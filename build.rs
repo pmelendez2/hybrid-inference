@@ -1,0 +1,81 @@
+use std::env;
+use std::path::PathBuf;
+
+fn main() {
+    println!("cargo:rerun-if-changed=wrapper.h");
+    println!("cargo:rustc-link-search=native=/usr/local/lib");
+    println!("cargo:rustc-link-lib=dylib=hailort");
+
+    let bindings = bindgen::Builder::default()
+        .header("wrapper.h")
+        .clang_arg("-I/opt/hailort/include")
+        .allowlist_type("hailo_status")
+        .allowlist_type("hailo_version_t")
+        .allowlist_type("hailo_device")
+        .allowlist_type("hailo_device_id_t")
+        .allowlist_type("hailo_scan_devices_params_t")
+        .allowlist_type("hailo_hef")
+        .allowlist_type("hailo_network_group_info_t")
+        .allowlist_type("hailo_vstream_info_t")
+        .allowlist_type("hailo_3d_image_shape_t")
+        .allowlist_type("hailo_nms_shape_t")
+        .allowlist_type("hailo_format_t")
+        .allowlist_type("hailo_quant_info_t")
+        .allowlist_type("hailo_stream_direction_t")
+        .allowlist_type("hailo_format_type_t")
+        .allowlist_type("hailo_format_order_t")
+        .allowlist_type("hailo_device")
+        .allowlist_type("hailo_configured_network_group")
+        .allowlist_type("hailo_configure_params_t")
+        .allowlist_type("hailo_vstream_params_t")
+        .allowlist_type("hailo_input_vstream_params_by_name_t")
+        .allowlist_type("hailo_output_vstream_params_by_name_t")
+        .allowlist_type("hailo_input_vstream")
+        .allowlist_type("hailo_output_vstream")
+        .allowlist_type("hailo_activated_network_group")
+        .allowlist_type("hailo_activate_network_group_params_t")
+        .allowlist_function("hailo_get_library_version")
+        .allowlist_function("hailo_get_status_message")
+        .allowlist_function("hailo_scan_devices")
+        .allowlist_function("hailo_create_device_by_id")
+        .allowlist_function("hailo_release_device")
+        .allowlist_function("hailo_create_hef_file")
+        .allowlist_function("hailo_release_hef")
+        .allowlist_function("hailo_hef_get_all_vstream_infos")
+        .allowlist_function("hailo_create_device_by_id")
+        .allowlist_function("hailo_release_device")
+        .allowlist_function("hailo_configure_device")
+        .allowlist_function("hailo_shutdown_network_group")
+        .allowlist_function("hailo_get_network_groups_infos")
+        .allowlist_function("hailo_make_input_vstream_params")
+        .allowlist_function("hailo_make_output_vstream_params")
+        .allowlist_function("hailo_create_input_vstreams")
+        .allowlist_function("hailo_create_output_vstreams")
+        .allowlist_function("hailo_release_input_vstreams")
+        .allowlist_function("hailo_release_output_vstreams")
+        .allowlist_function("hailo_get_input_vstream_frame_size")
+        .allowlist_function("hailo_get_output_vstream_frame_size")
+        .allowlist_function("hailo_activate_network_group")
+        .allowlist_function("hailo_deactivate_network_group")
+        .allowlist_function("hailo_vstream_write_raw_buffer")
+        .allowlist_function("hailo_vstream_read_raw_buffer")
+        .allowlist_function("hailo_flush_input_vstream")
+        .allowlist_var("HAILO_SUCCESS")
+        .allowlist_var("HAILO_MAX_DEVICE_ID_LENGTH")
+        .allowlist_var("HAILO_H2D_STREAM")
+        .allowlist_var("HAILO_D2H_STREAM")
+        .allowlist_var("HAILO_FORMAT_TYPE_.*")
+        .allowlist_var("HAILO_FORMAT_ORDER_.*")
+        .allowlist_var("HAILO_MAX_NETWORK_GROUPS")
+        .allowlist_var("HAILO_MAX_STREAMS_COUNT")
+        .derive_default(true)
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .generate()
+        .expect("failed to generate HailoRT 4.23 bindings");
+
+    let output_directory = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is not defined"));
+
+    bindings
+        .write_to_file(output_directory.join("hailort_bindings.rs"))
+        .expect("failed to write HailoRT bindings");
+}
