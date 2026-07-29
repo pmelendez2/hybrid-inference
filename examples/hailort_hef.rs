@@ -2059,15 +2059,7 @@ mod tests {
         // A 100x200 portrait image scales to 320x640 and receives
         // 160 pixels of padding on both horizontal sides.
         let image = preprocessed_image(100, 200, 320, 640, 160, 0);
-
-        let detection = Detection {
-            class_id: 1,
-            confidence: 0.90,
-            ymin: 0.25,
-            xmin: 0.25,
-            ymax: 0.75,
-            xmax: 0.75,
-        };
+        let detection = valid_detection();
 
         let bounding_box = map_detection_to_original(&detection, &image, 640, 640);
 
@@ -2083,14 +2075,7 @@ mod tests {
         // 160 pixels of padding above and below.
         let image = preprocessed_image(200, 100, 640, 320, 0, 160);
 
-        let detection = Detection {
-            class_id: 2,
-            confidence: 0.85,
-            ymin: 0.25,
-            xmin: 0.25,
-            ymax: 0.75,
-            xmax: 0.75,
-        };
+        let detection = valid_detection();
 
         let bounding_box = map_detection_to_original(&detection, &image, 640, 640);
 
