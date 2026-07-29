@@ -2346,4 +2346,18 @@ mod tests {
 
         assert_eq!(detection_label_y(&bounding_box), 0);
     }
+
+    #[test]
+    fn formats_unknown_detection_class_label() {
+        let detection = Detection {
+            class_id: COCO_CLASS_NAMES.len(),
+            confidence: 0.50,
+            ymin: 0.25,
+            xmin: 0.25,
+            ymax: 0.75,
+            xmax: 0.75,
+        };
+
+        assert_eq!(format_detection_label(&detection), "unknown 50.0%");
+    }
 }
