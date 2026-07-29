@@ -979,6 +979,10 @@ fn is_valid_bounding_box(bounding_box: &PixelBoundingBox) -> bool {
     bounding_box.left < bounding_box.right && bounding_box.top < bounding_box.bottom
 }
 
+fn detection_label_y(pixel_box: &PixelBoundingBox) -> u32 {
+    pixel_box.top.saturating_sub(ANNOTATION_LABEL_OFFSET)
+}
+
 fn map_detection_to_original(
     detection: &Detection,
     image: &PreprocessedImage,
@@ -1075,7 +1079,7 @@ fn draw_detection_label(
     pixel_box: &PixelBoundingBox,
 ) {
     let label = format_detection_label(detection);
-    let label_y = pixel_box.top.saturating_sub(ANNOTATION_LABEL_OFFSET);
+    let label_y = detection_label_y(pixel_box);
 
     draw_text_mut(
         annotated,
@@ -2317,5 +2321,29 @@ mod tests {
         };
 
         assert_eq!(format_detection_label(&detection), "person 86.2%");
+    }
+
+    #[test]
+    fn positions_detection_label_above_bounding_box() {
+        let bounding_box = PixelBoundingBox {
+            left: 10,
+            top: 100,
+            right: 110,
+            bottom: 220,
+        };
+
+        assert_eq!(detection_label_y(&bounding_box), 72);
+    }
+
+    #[test]
+    fn positions_detection_label_at_top_edge_without_underflow() {
+        let bounding_box = PixelBoundingBox {
+            left: 10,
+            top: 20,
+            right: 110,
+            bottom: 220,
+        };
+
+        assert_eq!(detection_label_y(&bounding_box), 0);
     }
 }
