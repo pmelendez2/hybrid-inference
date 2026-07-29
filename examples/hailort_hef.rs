@@ -1060,18 +1060,21 @@ fn draw_detection_bounding_box(annotated: &mut RgbImage, pixel_box: &PixelBoundi
     }
 }
 
+fn format_detection_label(detection: &Detection) -> String {
+    format!(
+        "{} {:.1}%",
+        class_name(detection.class_id),
+        detection.confidence * 100.0,
+    )
+}
+
 fn draw_detection_label(
     annotated: &mut RgbImage,
     font: &FontRef<'_>,
     detection: &Detection,
     pixel_box: &PixelBoundingBox,
 ) {
-    let label = format!(
-        "{} {:.1}%",
-        class_name(detection.class_id),
-        detection.confidence * 100.0,
-    );
-
+    let label = format_detection_label(detection);
     let label_y = pixel_box.top.saturating_sub(ANNOTATION_LABEL_OFFSET);
 
     draw_text_mut(
@@ -2300,5 +2303,19 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.directory);
         }
+    }
+
+    #[test]
+    fn formats_detection_label() {
+        let detection = Detection {
+            class_id: 0,
+            confidence: 0.862,
+            ymin: 0.2513,
+            xmin: 0.1482,
+            ymax: 0.9996,
+            xmax: 0.8460,
+        };
+
+        assert_eq!(format_detection_label(&detection), "person 86.2%");
     }
 }
