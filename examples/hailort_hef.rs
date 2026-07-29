@@ -1277,6 +1277,72 @@ fn derive_model_metadata(vstreams: &[hailort::hailo_vstream_info_t]) -> Result<M
     Ok(metadata)
 }
 
+fn describe_vstream(index: usize, vstream: &hailort::hailo_vstream_info_t) {
+    println!(
+        "      [{index}] name={} network={}",
+        vstream_name(vstream),
+        vstream_network_name(vstream)
+    );
+
+    println!(
+        "          direction={} format={} order={} flags={}",
+        direction_name(vstream.direction),
+        format_type_name(vstream.format.type_),
+        format_order_name(vstream.format.order),
+        vstream.format.flags
+    );
+
+    println!(
+        "          raw format: type={} order={}",
+        vstream.format.type_, vstream.format.order
+    );
+
+    if is_nms_order(vstream.format.order) {
+        // SAFETY: For an NMS format order, nms_shape is active.
+        let nms = unsafe { vstream.__bindgen_anon_1.nms_shape };
+
+        println!(
+            "          NMS: classes={} max_per_class={} \
+             max_total={} max_mask_bytes={}",
+            nms.number_of_classes,
+            nms.max_bboxes_per_class,
+            nms.max_bboxes_total,
+            nms.max_accumulated_mask_size
+        );
+
+        if vstream.format.order
+            == hailort::hailo_format_order_t_HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS
+        {
+            let count_bytes = std::mem::size_of::<f32>();
+            let bbox_bytes = 5 * std::mem::size_of::<f32>();
+
+            let max_frame_bytes = nms.number_of_classes as usize
+                * (count_bytes + nms.max_bboxes_per_class as usize * bbox_bytes);
+
+            println!(
+                "          maximum output frame size={} bytes",
+                max_frame_bytes
+            );
+        }
+    } else {
+        // SAFETY: For non-NMS format orders, shape is active.
+        let shape = unsafe { vstream.__bindgen_anon_1.shape };
+
+        println!(
+            "          shape={}x{}x{}",
+            shape.height, shape.width, shape.features
+        );
+    }
+
+    println!(
+        "          quantization: zero_point={} scale={} range=[{}, {}]",
+        vstream.quant_info.qp_zp,
+        vstream.quant_info.qp_scale,
+        vstream.quant_info.limvals_min,
+        vstream.quant_info.limvals_max
+    );
+}
+
 fn load_and_describe_model(hef_path: &str) -> Result<LoadedModel> {
     println!("Loading HEF: {hef_path}");
 
@@ -1320,70 +1386,8 @@ fn load_and_describe_model(hef_path: &str) -> Result<LoadedModel> {
     println!("    Selected network group: {first_group_name}");
     println!("    Virtual streams: {}", vstreams.len());
 
-    for (vstream_index, vstream) in vstreams.iter().enumerate() {
-        println!(
-            "      [{vstream_index}] name={} network={}",
-            vstream_name(vstream),
-            vstream_network_name(vstream)
-        );
-
-        println!(
-            "          direction={} format={} order={} flags={}",
-            direction_name(vstream.direction),
-            format_type_name(vstream.format.type_),
-            format_order_name(vstream.format.order),
-            vstream.format.flags
-        );
-
-        println!(
-            "          raw format: type={} order={}",
-            vstream.format.type_, vstream.format.order
-        );
-
-        if is_nms_order(vstream.format.order) {
-            // SAFETY: For an NMS format order, nms_shape is active.
-            let nms = unsafe { vstream.__bindgen_anon_1.nms_shape };
-
-            println!(
-                "          NMS: classes={} max_per_class={} \
-                 max_total={} max_mask_bytes={}",
-                nms.number_of_classes,
-                nms.max_bboxes_per_class,
-                nms.max_bboxes_total,
-                nms.max_accumulated_mask_size
-            );
-
-            if vstream.format.order
-                == hailort::hailo_format_order_t_HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS
-            {
-                let count_bytes = std::mem::size_of::<f32>();
-                let bbox_bytes = 5 * std::mem::size_of::<f32>();
-
-                let max_frame_bytes = nms.number_of_classes as usize
-                    * (count_bytes + nms.max_bboxes_per_class as usize * bbox_bytes);
-
-                println!(
-                    "          maximum output frame size={} bytes",
-                    max_frame_bytes
-                );
-            }
-        } else {
-            // SAFETY: For non-NMS format orders, shape is active.
-            let shape = unsafe { vstream.__bindgen_anon_1.shape };
-
-            println!(
-                "          shape={}x{}x{}",
-                shape.height, shape.width, shape.features
-            );
-        }
-
-        println!(
-            "          quantization: zero_point={} scale={} range=[{}, {}]",
-            vstream.quant_info.qp_zp,
-            vstream.quant_info.qp_scale,
-            vstream.quant_info.limvals_min,
-            vstream.quant_info.limvals_max
-        );
+    for (index, vstream) in vstreams.iter().enumerate() {
+        describe_vstream(index, vstream);
     }
 
     let metadata = derive_model_metadata(&vstreams)?;
