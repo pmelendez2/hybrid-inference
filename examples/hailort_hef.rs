@@ -1831,6 +1831,17 @@ mod tests {
         }
     }
 
+    fn valid_detection() -> Detection {
+        Detection {
+            class_id: 0,
+            confidence: 0.95,
+            ymin: 0.25,
+            xmin: 0.25,
+            ymax: 0.75,
+            xmax: 0.75,
+        }
+    }
+
     #[test]
     fn derives_yolov8_inference_contract() {
         let contract =
@@ -2314,10 +2325,7 @@ mod tests {
         let detection = Detection {
             class_id: 0,
             confidence: 0.862,
-            ymin: 0.2513,
-            xmin: 0.1482,
-            ymax: 0.9996,
-            xmax: 0.8460,
+            ..valid_detection()
         };
 
         assert_eq!(format_detection_label(&detection), "person 86.2%");
@@ -2352,10 +2360,7 @@ mod tests {
         let detection = Detection {
             class_id: COCO_CLASS_NAMES.len(),
             confidence: 0.50,
-            ymin: 0.25,
-            xmin: 0.25,
-            ymax: 0.75,
-            xmax: 0.75,
+            ..valid_detection()
         };
 
         assert_eq!(format_detection_label(&detection), "unknown 50.0%");
