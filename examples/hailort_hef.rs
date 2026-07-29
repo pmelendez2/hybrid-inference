@@ -2204,12 +2204,9 @@ mod tests {
         let preprocessed = preprocessed_image(32, 32, 32, 32, 0, 0);
 
         let invalid_detection = Detection {
-            class_id: 0,
-            confidence: 0.95,
-            ymin: 0.25,
             xmin: 0.75,
-            ymax: 0.75,
             xmax: 0.25,
+            ..valid_detection()
         };
 
         annotate_image(
@@ -2229,15 +2226,7 @@ mod tests {
     fn draws_valid_bounding_box_during_annotation() {
         let fixture = AnnotationTestFixture::new(32, 32);
         let preprocessed = preprocessed_image(32, 32, 32, 32, 0, 0);
-
-        let valid_detection = Detection {
-            class_id: 0,
-            confidence: 0.95,
-            ymin: 0.25,
-            xmin: 0.25,
-            ymax: 0.75,
-            xmax: 0.75,
-        };
+        let valid_detection = valid_detection();
 
         annotate_image(
             fixture.input_path(),
