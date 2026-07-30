@@ -1343,6 +1343,29 @@ fn describe_vstream(index: usize, vstream: &hailort::hailo_vstream_info_t) {
     );
 }
 
+fn describe_model(
+    network_groups: &[hailort::hailo_network_group_info_t],
+    selected_group_name: &str,
+    vstreams: &[hailort::hailo_vstream_info_t],
+) {
+    println!("Network groups: {}", network_groups.len());
+
+    for (index, info) in network_groups.iter().enumerate() {
+        println!(
+            "  [{index}] name={} multi_context={}",
+            network_group_name(info),
+            info.is_multi_context
+        );
+    }
+
+    println!("    Selected network group: {selected_group_name}");
+    println!("    Virtual streams: {}", vstreams.len());
+
+    for (index, vstream) in vstreams.iter().enumerate() {
+        describe_vstream(index, vstream);
+    }
+}
+
 fn load_and_describe_model(hef_path: &str) -> Result<LoadedModel> {
     println!("Loading HEF: {hef_path}");
 
@@ -1356,8 +1379,6 @@ fn load_and_describe_model(hef_path: &str) -> Result<LoadedModel> {
         .network_groups()
         .map_err(anyhow::Error::msg)
         .context("failed to obtain HEF network-group information")?;
-
-    println!("Network groups: {}", network_groups.len());
 
     let first_network_group = network_groups
         .first()
@@ -1375,20 +1396,7 @@ fn load_and_describe_model(hef_path: &str) -> Result<LoadedModel> {
             )
         })?;
 
-    for (index, info) in network_groups.iter().enumerate() {
-        println!(
-            "  [{index}] name={} multi_context={}",
-            network_group_name(info),
-            info.is_multi_context
-        );
-    }
-
-    println!("    Selected network group: {first_group_name}");
-    println!("    Virtual streams: {}", vstreams.len());
-
-    for (index, vstream) in vstreams.iter().enumerate() {
-        describe_vstream(index, vstream);
-    }
+    describe_model(&network_groups, &first_group_name, &vstreams);
 
     let metadata = derive_model_metadata(&vstreams)?;
 
