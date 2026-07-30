@@ -1438,48 +1438,48 @@ impl HailoConfiguredDevice {
     }
 }
 
-fn create_vstreams(
-    network_group: hailort::hailo_configured_network_group,
-) -> Result<HailoVStreams> {
-    println!("Creating input virtual streams");
+impl HailoVStreams {
+    fn create_and_describe(network_group: hailort::hailo_configured_network_group) -> Result<Self> {
+        println!("Creating input virtual streams");
 
-    let input = HailoInputVStreams::create(network_group)
-        .map_err(anyhow::Error::msg)
-        .context("failed to create input virtual streams")?;
-
-    println!("Input virtual streams created: {}", input.handles.len());
-
-    for index in 0..input.handles.len() {
-        let frame_size = input
-            .frame_size(index)
+        let input = HailoInputVStreams::create(network_group)
             .map_err(anyhow::Error::msg)
-            .with_context(|| {
-                format!("failed to obtain frame size for input virtual stream {index}")
-            })?;
+            .context("failed to create input virtual streams")?;
 
-        println!("  input[{index}] frame size={frame_size} bytes");
-    }
+        println!("Input virtual streams created: {}", input.handles.len());
 
-    println!("Creating output virtual streams");
+        for index in 0..input.handles.len() {
+            let frame_size = input
+                .frame_size(index)
+                .map_err(anyhow::Error::msg)
+                .with_context(|| {
+                    format!("failed to obtain frame size for input virtual stream {index}")
+                })?;
 
-    let output = HailoOutputVStreams::create(network_group)
-        .map_err(anyhow::Error::msg)
-        .context("failed to create output virtual streams")?;
+            println!("  input[{index}] frame size={frame_size} bytes");
+        }
 
-    println!("Output virtual streams created: {}", output.handles.len());
+        println!("Creating output virtual streams");
 
-    for index in 0..output.handles.len() {
-        let frame_size = output
-            .frame_size(index)
+        let output = HailoOutputVStreams::create(network_group)
             .map_err(anyhow::Error::msg)
-            .with_context(|| {
-                format!("failed to obtain frame size for output virtual stream {index}")
-            })?;
+            .context("failed to create output virtual streams")?;
 
-        println!("  output[{index}] frame size={frame_size} bytes");
+        println!("Output virtual streams created: {}", output.handles.len());
+
+        for index in 0..output.handles.len() {
+            let frame_size = output
+                .frame_size(index)
+                .map_err(anyhow::Error::msg)
+                .with_context(|| {
+                    format!("failed to obtain frame size for output virtual stream {index}")
+                })?;
+
+            println!("  output[{index}] frame size={frame_size} bytes");
+        }
+
+        Ok(Self { output, input })
     }
-
-    Ok(HailoVStreams { output, input })
 }
 
 fn derive_inference_contract(metadata: &ModelMetadata) -> Result<InferenceContract> {
@@ -1782,7 +1782,7 @@ fn run_inference(
     let configured_device = HailoConfiguredDevice::open_and_configure(&model.hef)?;
     let network_group = configured_device.first_network_group()?;
 
-    let vstreams = create_vstreams(network_group)?;
+    let vstreams = HailoVStreams::create_and_describe(network_group)?;
     validate_inference_contract(&model.metadata, &vstreams)?;
     let activated_network_group = activate_network_group(network_group)?;
 
