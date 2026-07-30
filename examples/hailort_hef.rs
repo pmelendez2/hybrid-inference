@@ -1736,6 +1736,37 @@ fn report_and_annotate_detections(
     Ok(())
 }
 
+fn process_image(
+    vstreams: &HailoVStreams,
+    metadata: &ModelMetadata,
+    image_path: &str,
+    output_path: &str,
+    confidence_threshold: f32,
+) -> Result<()> {
+    let preprocessed_image =
+        load_rgb_image(image_path, metadata.input_width, metadata.input_height)
+            .map_err(anyhow::Error::msg)
+            .context("failed to load and preprocess the input image")?;
+
+    let output_frame = infer_one(vstreams, &preprocessed_image.pixels)?;
+
+    let detections = postprocess_yolov8(
+        &output_frame,
+        confidence_threshold,
+        metadata.class_count,
+        metadata.max_detections_per_class,
+    )?;
+
+    report_and_annotate_detections(
+        image_path,
+        output_path,
+        &detections,
+        &preprocessed_image,
+        metadata.input_width,
+        metadata.input_height,
+    )
+}
+
 fn run_inference(
     hef_path: &str,
     image_path: &str,
@@ -1753,32 +1784,13 @@ fn run_inference(
     validate_inference_contract(&model.metadata, &vstreams)?;
     let activated_network_group = activate_network_group(network_group)?;
 
-    let preprocessed_image = load_rgb_image(
-        image_path,
-        model.metadata.input_width,
-        model.metadata.input_height,
-    )
-    .map_err(anyhow::Error::msg)
-    .context("failed to load and preprocess the input image")?;
-
-    let output_frame = infer_one(&vstreams, &preprocessed_image.pixels)?;
-
-    let detections = postprocess_yolov8(
-        &output_frame,
-        confidence_threshold,
-        model.metadata.class_count,
-        model.metadata.max_detections_per_class,
-    )?;
-
-    report_and_annotate_detections(
+    process_image(
+        &vstreams,
+        &model.metadata,
         image_path,
         output_path,
-        &detections,
-        &preprocessed_image,
-        model.metadata.input_width,
-        model.metadata.input_height,
+        confidence_threshold,
     )?;
-
     drop(activated_network_group);
 
     println!("Network group deactivated successfully");
