@@ -1771,17 +1771,19 @@ fn run_inference(
     let vstreams = HailoVStreams::create_and_describe(network_group)?;
     validate_inference_contract(&model.metadata, &vstreams)?;
 
-    let _activation = HailoActivatedNetworkGroup::activate(network_group)
-        .map_err(anyhow::Error::msg)
-        .context("failed to activate the network group.")?;
+    {
+        let _activation = HailoActivatedNetworkGroup::activate(network_group)
+            .map_err(anyhow::Error::msg)
+            .context("failed to activate the network group.")?;
 
-    process_image(
-        &vstreams,
-        &model.metadata,
-        image_path,
-        output_path,
-        confidence_threshold,
-    )?;
+        process_image(
+            &vstreams,
+            &model.metadata,
+            image_path,
+            output_path,
+            confidence_threshold,
+        )?;
+    }
 
     println!("Network group deactivated successfully");
 
