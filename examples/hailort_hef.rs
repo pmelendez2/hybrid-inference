@@ -1366,41 +1366,43 @@ fn describe_model(
     }
 }
 
-fn load_and_describe_model(hef_path: &str) -> Result<LoadedModel> {
-    println!("Loading HEF: {hef_path}");
+impl LoadedModel {
+    fn load_and_describe(hef_path: &str) -> Result<LoadedModel> {
+        println!("Loading HEF: {hef_path}");
 
-    let hef = HailoHef::load(hef_path)
-        .map_err(anyhow::Error::msg)
-        .with_context(|| format!("failed to load HEF '{hef_path}'"))?;
+        let hef = HailoHef::load(hef_path)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("failed to load HEF '{hef_path}'"))?;
 
-    println!("HEF loaded successfully");
+        println!("HEF loaded successfully");
 
-    let network_groups = hef
-        .network_groups()
-        .map_err(anyhow::Error::msg)
-        .context("failed to obtain HEF network-group information")?;
+        let network_groups = hef
+            .network_groups()
+            .map_err(anyhow::Error::msg)
+            .context("failed to obtain HEF network-group information")?;
 
-    let first_network_group = network_groups
-        .first()
-        .context("HEF contains no network groups")?;
+        let first_network_group = network_groups
+            .first()
+            .context("HEF contains no network groups")?;
 
-    let first_group_name = network_group_name(first_network_group);
+        let first_group_name = network_group_name(first_network_group);
 
-    let vstreams = hef
-        .vstream_infos(&first_group_name)
-        .map_err(anyhow::Error::msg)
-        .with_context(|| {
-            format!(
-                "failed to obtain virtual-stream information for \
-                 network group '{first_group_name}'"
-            )
-        })?;
+        let vstreams = hef
+            .vstream_infos(&first_group_name)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| {
+                format!(
+                    "failed to obtain virtual-stream information for \
+                     network group '{first_group_name}'"
+                )
+            })?;
 
-    describe_model(&network_groups, &first_group_name, &vstreams);
+        describe_model(&network_groups, &first_group_name, &vstreams);
 
-    let metadata = derive_model_metadata(&vstreams)?;
+        let metadata = derive_model_metadata(&vstreams)?;
 
-    Ok(LoadedModel { hef, metadata })
+        Ok(Self { hef, metadata })
+    }
 }
 
 fn open_and_configure_device(hef: &HailoHef) -> Result<HailoConfiguredDevice> {
@@ -1742,7 +1744,7 @@ fn run_inference(
 ) -> Result<()> {
     println!("Confidence threshold: {confidence_threshold:.2}");
 
-    let model = load_and_describe_model(hef_path)?;
+    let model = LoadedModel::load_and_describe(hef_path)?;
 
     let configured_device = open_and_configure_device(&model.hef)?;
     let network_group = configured_device.first_network_group()?;
