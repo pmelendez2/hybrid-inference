@@ -1596,20 +1596,6 @@ fn validate_inference_contract(metadata: &ModelMetadata, vstreams: &HailoVStream
     Ok(())
 }
 
-fn activate_network_group(
-    network_group: hailort::hailo_configured_network_group,
-) -> Result<HailoActivatedNetworkGroup> {
-    println!("Activating the configured network group");
-
-    let activated = HailoActivatedNetworkGroup::activate(network_group)
-        .map_err(anyhow::Error::msg)
-        .context("failed to activate the configured network group")?;
-
-    println!("Network group activated successfully");
-
-    Ok(activated)
-}
-
 fn infer_one(vstreams: &HailoVStreams, input_frame: &[u8]) -> Result<Vec<u8>> {
     let input_frame_size = vstreams
         .input
@@ -1784,7 +1770,10 @@ fn run_inference(
 
     let vstreams = HailoVStreams::create_and_describe(network_group)?;
     validate_inference_contract(&model.metadata, &vstreams)?;
-    let activated_network_group = activate_network_group(network_group)?;
+
+    let _activation = HailoActivatedNetworkGroup::activate(network_group)
+        .map_err(anyhow::Error::msg)
+        .context("failed to activate the network group.")?;
 
     process_image(
         &vstreams,
@@ -1793,9 +1782,9 @@ fn run_inference(
         output_path,
         confidence_threshold,
     )?;
-    drop(activated_network_group);
 
     println!("Network group deactivated successfully");
+
     println!(
         "The virtual streams, configured network group, device, and HEF \
          will now be released automatically"
