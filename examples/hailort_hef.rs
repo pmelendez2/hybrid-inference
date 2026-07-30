@@ -1367,7 +1367,7 @@ fn describe_model(
 }
 
 impl LoadedModel {
-    fn load_and_describe(hef_path: &str) -> Result<LoadedModel> {
+    fn load_and_describe(hef_path: &str) -> Result<Self> {
         println!("Loading HEF: {hef_path}");
 
         let hef = HailoHef::load(hef_path)
