@@ -1405,35 +1405,37 @@ impl LoadedModel {
     }
 }
 
-fn open_and_configure_device(hef: &HailoHef) -> Result<HailoConfiguredDevice> {
-    println!("Opening an available Hailo device");
+impl HailoConfiguredDevice {
+    fn open_and_configure(hef: &HailoHef) -> Result<Self> {
+        println!("Opening an available Hailo device");
 
-    let device = HailoDevice::open_any()
-        .map_err(anyhow::Error::msg)
-        .context("failed to open an available Hailo device")?;
+        let device = HailoDevice::open_any()
+            .map_err(anyhow::Error::msg)
+            .context("failed to open an available Hailo device")?;
 
-    println!("Hailo device opened successfully");
-    println!("Configuring the Hailo device from the HEF");
+        println!("Hailo device opened successfully");
+        println!("Configuring the Hailo device from the HEF");
 
-    let network_groups = device
-        .configure(hef)
-        .map_err(anyhow::Error::msg)
-        .context("failed to configure the Hailo device from the HEF")?;
+        let network_groups = device
+            .configure(hef)
+            .map_err(anyhow::Error::msg)
+            .context("failed to configure the Hailo device from the HEF")?;
 
-    if network_groups.is_empty() {
-        anyhow::bail!("no configured network groups were returned");
+        if network_groups.is_empty() {
+            anyhow::bail!("no configured network groups were returned");
+        }
+
+        println!("Configured network groups: {}", network_groups.len());
+
+        for (index, handle) in network_groups.iter().enumerate() {
+            println!("  [{index}] handle={handle:p}");
+        }
+
+        Ok(Self {
+            _device: device,
+            network_groups,
+        })
     }
-
-    println!("Configured network groups: {}", network_groups.len());
-
-    for (index, handle) in network_groups.iter().enumerate() {
-        println!("  [{index}] handle={handle:p}");
-    }
-
-    Ok(HailoConfiguredDevice {
-        _device: device,
-        network_groups,
-    })
 }
 
 fn create_vstreams(
@@ -1777,7 +1779,7 @@ fn run_inference(
 
     let model = LoadedModel::load_and_describe(hef_path)?;
 
-    let configured_device = open_and_configure_device(&model.hef)?;
+    let configured_device = HailoConfiguredDevice::open_and_configure(&model.hef)?;
     let network_group = configured_device.first_network_group()?;
 
     let vstreams = create_vstreams(network_group)?;
