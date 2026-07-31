@@ -5,8 +5,8 @@ use image::{Rgb, RgbImage};
 use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 
-use super::PreprocessedImage;
 use super::postprocessing::{Detection, class_name};
+use super::preprocessing::PreprocessedImage;
 
 const ANNOTATION_FONT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
