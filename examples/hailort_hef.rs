@@ -999,6 +999,34 @@ impl HailoVStreams {
 
         Ok(Self { output, input })
     }
+
+    fn input_count(&self) -> usize {
+        self.input.handles.len()
+    }
+
+    fn output_count(&self) -> usize {
+        self.output.handles.len()
+    }
+
+    fn input_frame_size(&self, index: usize) -> Result<usize, String> {
+        self.input.frame_size(index)
+    }
+
+    fn output_frame_size(&self, index: usize) -> Result<usize, String> {
+        self.output.frame_size(index)
+    }
+
+    fn write_input(&self, index: usize, buffer: &[u8]) -> Result<(), String> {
+        self.input.write(index, buffer)
+    }
+
+    fn read_output(&self, index: usize, buffer: &mut [u8]) -> Result<(), String> {
+        self.output.read(index, buffer)
+    }
+
+    fn flush_input(&self, index: usize) -> Result<(), String> {
+        self.input.flush(index)
+    }
 }
 
 fn derive_inference_contract(metadata: &ModelMetadata) -> Result<InferenceContract> {
@@ -1055,25 +1083,24 @@ fn derive_inference_contract(metadata: &ModelMetadata) -> Result<InferenceContra
 }
 
 fn validate_inference_contract(metadata: &ModelMetadata, vstreams: &HailoVStreams) -> Result<()> {
-    if vstreams.input.handles.len() != 1 {
+    if vstreams.input_count() != 1 {
         bail!(
             "inference pipeline requires exactly one input virtual stream; HEF created {}",
-            vstreams.input.handles.len()
+            vstreams.input_count()
         );
     }
 
-    if vstreams.output.handles.len() != 1 {
+    if vstreams.output_count() != 1 {
         bail!(
             "inference pipeline requires exactly one output virtual stream; HEF created {}",
-            vstreams.output.handles.len()
+            vstreams.output_count()
         );
     }
 
     let contract = derive_inference_contract(metadata)?;
 
     let actual_input_size = vstreams
-        .input
-        .frame_size(0)
+        .input_frame_size(0)
         .map_err(anyhow::Error::msg)
         .context("failed to obtain runtime input frame size")?;
 
@@ -1090,8 +1117,7 @@ fn validate_inference_contract(metadata: &ModelMetadata, vstreams: &HailoVStream
     }
 
     let actual_output_size = vstreams
-        .output
-        .frame_size(0)
+        .output_frame_size(0)
         .map_err(anyhow::Error::msg)
         .context("failed to obtain runtime output frame size")?;
 
@@ -1117,8 +1143,7 @@ fn validate_inference_contract(metadata: &ModelMetadata, vstreams: &HailoVStream
 
 fn infer_one(vstreams: &HailoVStreams, input_frame: &[u8]) -> Result<Vec<u8>> {
     let input_frame_size = vstreams
-        .input
-        .frame_size(0)
+        .input_frame_size(0)
         .map_err(anyhow::Error::msg)
         .context("failed to obtain the input frame size")?;
 
@@ -1131,8 +1156,7 @@ fn infer_one(vstreams: &HailoVStreams, input_frame: &[u8]) -> Result<Vec<u8>> {
     }
 
     let output_frame_size = vstreams
-        .output
-        .frame_size(0)
+        .output_frame_size(0)
         .map_err(anyhow::Error::msg)
         .context("failed to obtain the output frame size")?;
 
@@ -1144,8 +1168,7 @@ fn infer_one(vstreams: &HailoVStreams, input_frame: &[u8]) -> Result<Vec<u8>> {
     );
 
     vstreams
-        .input
-        .write(0, input_frame)
+        .write_input(0, input_frame)
         .map_err(anyhow::Error::msg)
         .context("failed to write the input frame")?;
 
@@ -1153,8 +1176,7 @@ fn infer_one(vstreams: &HailoVStreams, input_frame: &[u8]) -> Result<Vec<u8>> {
     println!("Reading one inference result");
 
     vstreams
-        .output
-        .read(0, &mut output_frame)
+        .read_output(0, &mut output_frame)
         .map_err(anyhow::Error::msg)
         .context("failed to read the output frame")?;
 
@@ -1164,8 +1186,7 @@ fn infer_one(vstreams: &HailoVStreams, input_frame: &[u8]) -> Result<Vec<u8>> {
     );
 
     vstreams
-        .input
-        .flush(0)
+        .flush_input(0)
         .map_err(anyhow::Error::msg)
         .context("failed to flush the input virtual stream")?;
 
