@@ -1,4 +1,5 @@
-use anyhow::{Context, Result};
+#[path = "hailort_hef/pipeline.rs"]
+mod pipeline;
 
 #[path = "hailort_hef/postprocessing.rs"]
 mod postprocessing;
@@ -21,15 +22,11 @@ mod annotation;
 #[path = "hailort_hef/cli.rs"]
 mod cli;
 
-use annotation::{annotate_image, map_detection_to_original};
-use cli::{Cli, validate_readable_file};
-use inference::{infer_one, validate_inference_contract};
-use model::{LoadedModel, ModelMetadata};
-use postprocessing::{Detection, class_name, postprocess_yolov8};
-use preprocessing::{PreprocessedImage, load_rgb_image};
-use runtime::{HailoActivatedNetworkGroup, HailoConfiguredDevice, HailoVStreams};
-
+use anyhow::Result;
 use clap::Parser;
+
+use cli::{Cli, validate_readable_file};
+use pipeline::run_inference;
 
 #[allow(
     dead_code,
@@ -39,122 +36,6 @@ use clap::Parser;
 )]
 mod hailort {
     include!(concat!(env!("OUT_DIR"), "/hailort_bindings.rs"));
-}
-
-fn report_and_annotate_detections(
-    image_path: &str,
-    output_path: &str,
-    detections: &[Detection],
-    preprocessed_image: &PreprocessedImage,
-    model_width: u32,
-    model_height: u32,
-) -> Result<()> {
-    for (index, detection) in detections.iter().enumerate() {
-        let pixel_box =
-            map_detection_to_original(detection, preprocessed_image, model_width, model_height);
-
-        println!(
-            "  [{index}] class={} name={} confidence={:.3} \
-             normalized=(ymin={:.4}, xmin={:.4}, ymax={:.4}, xmax={:.4}) \
-             original=(left={}, top={}, right={}, bottom={})",
-            detection.class_id,
-            class_name(detection.class_id),
-            detection.confidence,
-            detection.ymin,
-            detection.xmin,
-            detection.ymax,
-            detection.xmax,
-            pixel_box.left,
-            pixel_box.top,
-            pixel_box.right,
-            pixel_box.bottom,
-        );
-    }
-
-    annotate_image(
-        image_path,
-        output_path,
-        detections,
-        preprocessed_image,
-        model_width,
-        model_height,
-    )
-    .map_err(anyhow::Error::msg)
-    .context("failed to annotate the input image")?;
-
-    println!("Annotated image saved: {output_path}");
-
-    Ok(())
-}
-
-fn process_image(
-    vstreams: &HailoVStreams,
-    metadata: &ModelMetadata,
-    image_path: &str,
-    output_path: &str,
-    confidence_threshold: f32,
-) -> Result<()> {
-    let preprocessed_image =
-        load_rgb_image(image_path, metadata.input_width, metadata.input_height)
-            .map_err(anyhow::Error::msg)
-            .context("failed to load and preprocess the input image")?;
-
-    let output_frame = infer_one(vstreams, &preprocessed_image.pixels)?;
-
-    let detections = postprocess_yolov8(
-        &output_frame,
-        confidence_threshold,
-        metadata.class_count,
-        metadata.max_detections_per_class,
-    )?;
-
-    report_and_annotate_detections(
-        image_path,
-        output_path,
-        &detections,
-        &preprocessed_image,
-        metadata.input_width,
-        metadata.input_height,
-    )
-}
-
-fn run_inference(
-    hef_path: &str,
-    image_path: &str,
-    output_path: &str,
-    confidence_threshold: f32,
-) -> Result<()> {
-    println!("Confidence threshold: {confidence_threshold:.2}");
-
-    let model = LoadedModel::load_and_describe(hef_path)?;
-
-    let configured_device = HailoConfiguredDevice::open_and_configure(&model.hef)?;
-    let network_group = configured_device.first_network_group()?;
-
-    let vstreams = HailoVStreams::create_and_describe(network_group)?;
-    validate_inference_contract(&model.metadata, &vstreams)?;
-
-    {
-        let _activation = HailoActivatedNetworkGroup::activate(network_group)
-            .map_err(anyhow::Error::msg)
-            .context("failed to activate the network group.")?;
-
-        process_image(
-            &vstreams,
-            &model.metadata,
-            image_path,
-            output_path,
-            confidence_threshold,
-        )?;
-    }
-
-    println!("Network group deactivated successfully");
-
-    println!(
-        "The virtual streams, configured network group, device, and HEF \
-         will now be released automatically"
-    );
-    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -176,12 +57,16 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::annotation::{
-        PixelBoundingBox, detection_label_y, format_detection_label, is_valid_bounding_box,
+        PixelBoundingBox, annotate_image, detection_label_y, format_detection_label,
+        is_valid_bounding_box, map_detection_to_original,
     };
     use super::inference::{InferenceContract, derive_inference_contract};
-    use super::*;
+    use super::model::ModelMetadata;
+    use super::postprocessing::{
+        COCO_CLASS_NAMES, Detection, decode_nms_by_class, postprocess_yolov8,
+    };
+    use super::preprocessing::PreprocessedImage;
     use image::{Rgb, RgbImage};
-    use postprocessing::{COCO_CLASS_NAMES, decode_nms_by_class};
 
     fn valid_metadata() -> ModelMetadata {
         ModelMetadata {
