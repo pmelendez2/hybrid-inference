@@ -1,8 +1,87 @@
-use anyhow::{Context, Result, bail};
 use std::ffi::CStr;
+use std::fmt;
 
 use super::hailort;
 use super::runtime::HailoHef;
+
+#[derive(Debug)]
+pub(super) enum ModelError {
+    FailedToLoadHef {
+        path: String,
+        source: String,
+    },
+    FailedToObtainNetworkGroupInformation {
+        source: String,
+    },
+    NoNetworkGroups,
+    FailedToObtainVirtualStreamInformation {
+        network_group: String,
+        source: String,
+    },
+    NoNonNmsInputVirtualStream,
+    NoNmsByClassOutputVirtualStream,
+    InvalidInputShape {
+        height: u32,
+        width: u32,
+        channels: u32,
+    },
+    UnsupportedInputChannels {
+        channels: u32,
+    },
+    ZeroNmsClasses,
+    ZeroMaxDetectionsPerClass,
+}
+
+impl fmt::Display for ModelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::FailedToLoadHef { path, source } => {
+                write!(f, "failed to load HEF '{path}': {source}")
+            }
+            Self::FailedToObtainNetworkGroupInformation { source } => {
+                write!(
+                    f,
+                    "failed to obtain HEF network-group information: {source}"
+                )
+            }
+            Self::NoNetworkGroups => write!(f, "HEF contains no network groups"),
+            Self::FailedToObtainVirtualStreamInformation {
+                network_group,
+                source,
+            } => write!(
+                f,
+                "failed to obtain virtual-stream information for network group '{network_group}': {source}"
+            ),
+            Self::NoNonNmsInputVirtualStream => {
+                write!(f, "HEF contains no non-NMS input virtual stream")
+            }
+            Self::NoNmsByClassOutputVirtualStream => {
+                write!(
+                    f,
+                    "HEF contains no HAILO_NMS_BY_CLASS output virtual stream"
+                )
+            }
+            Self::InvalidInputShape {
+                height,
+                width,
+                channels,
+            } => write!(
+                f,
+                "HEF reports an invalid input shape: {height}x{width}x{channels}"
+            ),
+            Self::UnsupportedInputChannels { channels } => write!(
+                f,
+                "RGB preprocessing requires 3 input channels, but the HEF reports {channels}"
+            ),
+            Self::ZeroNmsClasses => write!(f, "HEF reports zero NMS classes"),
+            Self::ZeroMaxDetectionsPerClass => {
+                write!(f, "HEF reports zero maximum detections per class")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ModelError {}
 fn network_group_name(info: &hailort::hailo_network_group_info_t) -> String {
     // SAFETY: HailoRT documents this fixed-size name field as a
     // null-terminated C string.
@@ -83,14 +162,16 @@ pub(super) struct LoadedModel {
     pub(super) metadata: ModelMetadata,
 }
 
-fn derive_model_metadata(vstreams: &[hailort::hailo_vstream_info_t]) -> Result<ModelMetadata> {
+fn derive_model_metadata(
+    vstreams: &[hailort::hailo_vstream_info_t],
+) -> Result<ModelMetadata, ModelError> {
     let input = vstreams
         .iter()
         .find(|vstream| {
             vstream.direction == hailort::hailo_stream_direction_t_HAILO_H2D_STREAM
                 && !is_nms_order(vstream.format.order)
         })
-        .context("HEF contains no non-NMS input virtual stream")?;
+        .ok_or(ModelError::NoNonNmsInputVirtualStream)?;
 
     let output = vstreams
         .iter()
@@ -99,7 +180,7 @@ fn derive_model_metadata(vstreams: &[hailort::hailo_vstream_info_t]) -> Result<M
                 && vstream.format.order
                     == hailort::hailo_format_order_t_HAILO_FORMAT_ORDER_HAILO_NMS_BY_CLASS
         })
-        .context("HEF contains no HAILO_NMS_BY_CLASS output virtual stream")?;
+        .ok_or(ModelError::NoNmsByClassOutputVirtualStream)?;
 
     // SAFETY: The selected input stream has a non-NMS format order,
     // so the shape union member is active.
@@ -118,27 +199,25 @@ fn derive_model_metadata(vstreams: &[hailort::hailo_vstream_info_t]) -> Result<M
     };
 
     if metadata.input_width == 0 || metadata.input_height == 0 || metadata.input_channels == 0 {
-        bail!(
-            "HEF reports an invalid input shape: {}x{}x{}",
-            metadata.input_height,
-            metadata.input_width,
-            metadata.input_channels
-        );
+        return Err(ModelError::InvalidInputShape {
+            height: metadata.input_height,
+            width: metadata.input_width,
+            channels: metadata.input_channels,
+        });
     }
 
     if metadata.input_channels != 3 {
-        bail!(
-            "RGB preprocessing requires 3 input channels, but the HEF reports {}",
-            metadata.input_channels
-        );
+        return Err(ModelError::UnsupportedInputChannels {
+            channels: metadata.input_channels,
+        });
     }
 
     if metadata.class_count == 0 {
-        bail!("HEF reports zero NMS classes");
+        return Err(ModelError::ZeroNmsClasses);
     }
 
     if metadata.max_detections_per_class == 0 {
-        bail!("HEF reports zero maximum detections per class");
+        return Err(ModelError::ZeroMaxDetectionsPerClass);
     }
 
     println!(
@@ -244,35 +323,30 @@ fn describe_model(
 }
 
 impl LoadedModel {
-    pub(super) fn load_and_describe(hef_path: &str) -> Result<Self> {
+    pub(super) fn load_and_describe(hef_path: &str) -> Result<Self, ModelError> {
         println!("Loading HEF: {hef_path}");
 
-        let hef = HailoHef::load(hef_path)
-            .map_err(anyhow::Error::msg)
-            .with_context(|| format!("failed to load HEF '{hef_path}'"))?;
+        let hef = HailoHef::load(hef_path).map_err(|source| ModelError::FailedToLoadHef {
+            path: hef_path.to_owned(),
+            source,
+        })?;
 
         println!("HEF loaded successfully");
 
         let network_groups = hef
             .network_groups()
-            .map_err(anyhow::Error::msg)
-            .context("failed to obtain HEF network-group information")?;
+            .map_err(|source| ModelError::FailedToObtainNetworkGroupInformation { source })?;
 
-        let first_network_group = network_groups
-            .first()
-            .context("HEF contains no network groups")?;
+        let first_network_group = network_groups.first().ok_or(ModelError::NoNetworkGroups)?;
 
         let first_group_name = network_group_name(first_network_group);
 
-        let vstreams = hef
-            .vstream_infos(&first_group_name)
-            .map_err(anyhow::Error::msg)
-            .with_context(|| {
-                format!(
-                    "failed to obtain virtual-stream information for \
-                     network group '{first_group_name}'"
-                )
-            })?;
+        let vstreams = hef.vstream_infos(&first_group_name).map_err(|source| {
+            ModelError::FailedToObtainVirtualStreamInformation {
+                network_group: first_group_name.clone(),
+                source,
+            }
+        })?;
 
         describe_model(&network_groups, &first_group_name, &vstreams);
 
