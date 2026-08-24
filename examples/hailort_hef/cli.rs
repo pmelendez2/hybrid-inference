@@ -1,6 +1,9 @@
+use std::error::Error;
+use std::fmt;
 use std::fs::File;
+use std::io;
+use std::num::ParseFloatError;
 
-use anyhow::{Context, Result, bail};
 use clap::Parser;
 
 const DEFAULT_HEF_PATH: &str = "/models/hefs/yolov8n_hailo8_v2.18.0.hef";
@@ -8,16 +11,91 @@ const DEFAULT_IMAGE_PATH: &str = "/models/images/culdesac-latest.jpg";
 const DEFAULT_OUTPUT_PATH: &str = "output/annotated.jpg";
 const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.50;
 
-fn parse_confidence_threshold(value: &str) -> Result<f32, String> {
-    let threshold = value
-        .parse::<f32>()
-        .map_err(|error| format!("invalid confidence threshold '{value}': {error}"))?;
+#[derive(Debug)]
+pub(super) enum CliError {
+    InvalidConfidenceThreshold {
+        value: String,
+        source: ParseFloatError,
+    },
+    ConfidenceThresholdOutOfRange {
+        value: String,
+    },
+    FileCannotBeAccessed {
+        description: String,
+        path: String,
+        source: io::Error,
+    },
+    NotARegularFile {
+        description: String,
+        path: String,
+    },
+    FileCannotBeOpenedForReading {
+        description: String,
+        path: String,
+        source: io::Error,
+    },
+}
+
+impl fmt::Display for CliError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidConfidenceThreshold { value, source } => {
+                write!(
+                    formatter,
+                    "invalid confidence threshold '{value}': {source}"
+                )
+            }
+            Self::ConfidenceThresholdOutOfRange { value } => write!(
+                formatter,
+                "confidence threshold must be between 0.0 and 1.0; received {value}"
+            ),
+            Self::FileCannotBeAccessed {
+                description,
+                path,
+                source,
+            } => write!(
+                formatter,
+                "{description} '{path}' cannot be accessed: {source}"
+            ),
+            Self::NotARegularFile { description, path } => {
+                write!(formatter, "{description} '{path}' is not a regular file")
+            }
+            Self::FileCannotBeOpenedForReading {
+                description,
+                path,
+                source,
+            } => write!(
+                formatter,
+                "{description} '{path}' cannot be opened for reading: {source}"
+            ),
+        }
+    }
+}
+
+impl Error for CliError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::InvalidConfidenceThreshold { source, .. } => Some(source),
+            Self::FileCannotBeAccessed { source, .. }
+            | Self::FileCannotBeOpenedForReading { source, .. } => Some(source),
+            Self::ConfidenceThresholdOutOfRange { .. } | Self::NotARegularFile { .. } => None,
+        }
+    }
+}
+
+fn parse_confidence_threshold(value: &str) -> Result<f32, CliError> {
+    let threshold =
+        value
+            .parse::<f32>()
+            .map_err(|source| CliError::InvalidConfidenceThreshold {
+                value: value.to_owned(),
+                source,
+            })?;
 
     if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
-        return Err(format!(
-            "confidence threshold must be between 0.0 and 1.0; \
-             received {value}"
-        ));
+        return Err(CliError::ConfidenceThresholdOutOfRange {
+            value: value.to_owned(),
+        });
     }
 
     Ok(threshold)
@@ -53,16 +131,25 @@ pub(super) struct Cli {
     pub(super) confidence: f32,
 }
 
-pub(super) fn validate_readable_file(path: &str, description: &str) -> Result<()> {
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("{description} '{path}' cannot be accessed"))?;
+pub(super) fn validate_readable_file(path: &str, description: &str) -> Result<(), CliError> {
+    let metadata = std::fs::metadata(path).map_err(|source| CliError::FileCannotBeAccessed {
+        description: description.to_owned(),
+        path: path.to_owned(),
+        source,
+    })?;
 
     if !metadata.is_file() {
-        bail!("{description} '{path}' is not a regular file");
+        return Err(CliError::NotARegularFile {
+            description: description.to_owned(),
+            path: path.to_owned(),
+        });
     }
 
-    File::open(path)
-        .with_context(|| format!("{description} '{path}' cannot be opened for reading"))?;
+    File::open(path).map_err(|source| CliError::FileCannotBeOpenedForReading {
+        description: description.to_owned(),
+        path: path.to_owned(),
+        source,
+    })?;
 
     Ok(())
 }
