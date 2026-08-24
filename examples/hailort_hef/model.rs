@@ -2,21 +2,21 @@ use std::ffi::CStr;
 use std::fmt;
 
 use super::hailort;
-use super::runtime::HailoHef;
+use super::runtime::{HailoHef, RuntimeError};
 
 #[derive(Debug)]
 pub(super) enum ModelError {
     FailedToLoadHef {
         path: String,
-        source: String,
+        source: RuntimeError,
     },
     FailedToObtainNetworkGroupInformation {
-        source: String,
+        source: RuntimeError,
     },
     NoNetworkGroups,
     FailedToObtainVirtualStreamInformation {
         network_group: String,
-        source: String,
+        source: RuntimeError,
     },
     NoNonNmsInputVirtualStream,
     NoNmsByClassOutputVirtualStream,
@@ -81,7 +81,17 @@ impl fmt::Display for ModelError {
     }
 }
 
-impl std::error::Error for ModelError {}
+impl std::error::Error for ModelError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::FailedToLoadHef { source, .. }
+            | Self::FailedToObtainNetworkGroupInformation { source }
+            | Self::FailedToObtainVirtualStreamInformation { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
 fn network_group_name(info: &hailort::hailo_network_group_info_t) -> String {
     // SAFETY: HailoRT documents this fixed-size name field as a
     // null-terminated C string.

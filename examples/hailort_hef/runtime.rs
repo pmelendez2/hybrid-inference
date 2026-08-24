@@ -1,18 +1,121 @@
 use std::ffi::CString;
+use std::fmt;
 use std::ptr;
 
-use anyhow::{Context, Result};
-
 use super::hailort;
+
+#[derive(Debug)]
+pub(super) enum RuntimeError {
+    HefPathContainsNullByte {
+        path: String,
+    },
+    CreateHefFailed {
+        path: String,
+        status: hailort::hailo_status,
+    },
+    NullHefHandle {
+        path: String,
+    },
+    NetworkGroupNameContainsNullByte {
+        network_group: String,
+    },
+    HailoRtCallFailed {
+        operation: &'static str,
+        status: hailort::hailo_status,
+    },
+    NullHandle {
+        operation: &'static str,
+    },
+    CountExceedsCapacity {
+        resource: &'static str,
+        count: usize,
+        capacity: usize,
+    },
+    InvalidVStreamIndex {
+        direction: &'static str,
+        index: usize,
+    },
+    BufferSizeMismatch {
+        direction: &'static str,
+        index: usize,
+        actual: usize,
+        expected: usize,
+    },
+    NoConfiguredNetworkGroups,
+}
+
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HefPathContainsNullByte { path } => {
+                write!(f, "HEF path contains a null byte: {path}")
+            }
+            Self::CreateHefFailed { path, status } => {
+                write!(
+                    f,
+                    "hailo_create_hef_file failed for {path}: status={status}"
+                )
+            }
+            Self::NullHefHandle { path } => {
+                write!(
+                    f,
+                    "HailoRT returned success but supplied a null HEF handle: {path}"
+                )
+            }
+            Self::NetworkGroupNameContainsNullByte { network_group } => {
+                write!(
+                    f,
+                    "network-group name contains a null byte: {network_group}"
+                )
+            }
+            Self::HailoRtCallFailed { operation, status } => {
+                write!(f, "{operation} failed: status={status}")
+            }
+            Self::NullHandle { operation } => {
+                write!(f, "{operation} succeeded but returned a null handle")
+            }
+            Self::CountExceedsCapacity {
+                resource,
+                count,
+                capacity,
+            } => {
+                write!(
+                    f,
+                    "HailoRT reported {count} {resource}, but the buffer capacity is {capacity}"
+                )
+            }
+            Self::InvalidVStreamIndex { direction, index } => {
+                write!(f, "invalid {direction} vstream index {index}")
+            }
+            Self::BufferSizeMismatch {
+                direction,
+                index,
+                actual,
+                expected,
+            } => {
+                write!(
+                    f,
+                    "{direction} vstream {index} buffer is {actual} bytes; expected {expected} bytes"
+                )
+            }
+            Self::NoConfiguredNetworkGroups => {
+                write!(f, "no configured network groups were returned")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RuntimeError {}
 
 pub(super) struct HailoHef {
     handle: hailort::hailo_hef,
 }
 
 impl HailoHef {
-    pub(super) fn load(path: &str) -> Result<Self, String> {
-        let c_path =
-            CString::new(path).map_err(|_| format!("HEF path contains a null byte: {path}"))?;
+    pub(super) fn load(path: &str) -> Result<Self, RuntimeError> {
+        let c_path = CString::new(path).map_err(|_| RuntimeError::HefPathContainsNullByte {
+            path: path.to_owned(),
+        })?;
 
         let mut handle: hailort::hailo_hef = ptr::null_mut();
 
@@ -23,15 +126,16 @@ impl HailoHef {
         let status = unsafe { hailort::hailo_create_hef_file(&mut handle, c_path.as_ptr()) };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_create_hef_file failed for {path}: status={status}"
-            ));
+            return Err(RuntimeError::CreateHefFailed {
+                path: path.to_owned(),
+                status,
+            });
         }
 
         if handle.is_null() {
-            return Err(format!(
-                "HailoRT returned success but supplied a null HEF handle: {path}"
-            ));
+            return Err(RuntimeError::NullHefHandle {
+                path: path.to_owned(),
+            });
         }
 
         Ok(Self { handle })
@@ -39,7 +143,7 @@ impl HailoHef {
 
     pub(super) fn network_groups(
         &self,
-    ) -> Result<Vec<hailort::hailo_network_group_info_t>, String> {
+    ) -> Result<Vec<hailort::hailo_network_group_info_t>, RuntimeError> {
         const CAPACITY: usize = 16;
 
         let mut infos = vec![hailort::hailo_network_group_info_t::default(); CAPACITY];
@@ -54,17 +158,18 @@ impl HailoHef {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_get_network_groups_infos failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_get_network_groups_infos",
+                status,
+            });
         }
 
         if count > infos.len() {
-            return Err(format!(
-                "HailoRT reported {count} network groups, \
-                 but the buffer capacity is {}",
-                infos.len()
-            ));
+            return Err(RuntimeError::CountExceedsCapacity {
+                resource: "network groups",
+                count,
+                capacity: infos.len(),
+            });
         }
 
         infos.truncate(count);
@@ -74,11 +179,14 @@ impl HailoHef {
     pub(super) fn vstream_infos(
         &self,
         network_group_name: &str,
-    ) -> Result<Vec<hailort::hailo_vstream_info_t>, String> {
+    ) -> Result<Vec<hailort::hailo_vstream_info_t>, RuntimeError> {
         const CAPACITY: usize = 64;
 
-        let name = CString::new(network_group_name)
-            .map_err(|_| "network-group name contains a null byte".to_string())?;
+        let name = CString::new(network_group_name).map_err(|_| {
+            RuntimeError::NetworkGroupNameContainsNullByte {
+                network_group: network_group_name.to_owned(),
+            }
+        })?;
 
         let mut infos = vec![hailort::hailo_vstream_info_t::default(); CAPACITY];
         let mut count = infos.len();
@@ -98,17 +206,18 @@ impl HailoHef {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_hef_get_all_vstream_infos failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_hef_get_all_vstream_infos",
+                status,
+            });
         }
 
         if count > infos.len() {
-            return Err(format!(
-                "HailoRT reported {count} virtual streams, \
-                 but the buffer capacity is {}",
-                infos.len()
-            ));
+            return Err(RuntimeError::CountExceedsCapacity {
+                resource: "virtual streams",
+                count,
+                capacity: infos.len(),
+            });
         }
 
         infos.truncate(count);
@@ -137,7 +246,7 @@ struct HailoDevice {
 }
 
 impl HailoDevice {
-    fn open_any() -> Result<Self, String> {
+    fn open_any() -> Result<Self, RuntimeError> {
         let mut handle: hailort::hailo_device = std::ptr::null_mut();
 
         // SAFETY:
@@ -146,13 +255,16 @@ impl HailoDevice {
         let status = unsafe { hailort::hailo_create_device_by_id(std::ptr::null(), &mut handle) };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!("hailo_create_device_by_id failed: status={status}"));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_create_device_by_id",
+                status,
+            });
         }
 
         if handle.is_null() {
-            return Err(
-                "hailo_create_device_by_id succeeded but returned a null handle".to_string(),
-            );
+            return Err(RuntimeError::NullHandle {
+                operation: "hailo_create_device_by_id",
+            });
         }
 
         Ok(Self { handle })
@@ -161,7 +273,7 @@ impl HailoDevice {
     fn configure(
         &self,
         hef: &HailoHef,
-    ) -> Result<Vec<hailort::hailo_configured_network_group>, String> {
+    ) -> Result<Vec<hailort::hailo_configured_network_group>, RuntimeError> {
         let capacity = hailort::HAILO_MAX_NETWORK_GROUPS as usize;
 
         let mut network_groups = vec![std::ptr::null_mut(); capacity];
@@ -184,21 +296,26 @@ impl HailoDevice {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!("hailo_configure_device failed: status={status}"));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_configure_device",
+                status,
+            });
         }
 
         if count > network_groups.len() {
-            return Err(format!(
-                "HailoRT reported {count} configured network groups, \
-                 but the buffer capacity is {}",
-                network_groups.len()
-            ));
+            return Err(RuntimeError::CountExceedsCapacity {
+                resource: "configured network groups",
+                count,
+                capacity: network_groups.len(),
+            });
         }
 
         network_groups.truncate(count);
 
         if network_groups.iter().any(|handle| handle.is_null()) {
-            return Err("hailo_configure_device returned a null network-group handle".to_string());
+            return Err(RuntimeError::NullHandle {
+                operation: "hailo_configure_device",
+            });
         }
 
         Ok(network_groups)
@@ -210,7 +327,9 @@ struct HailoInputVStreams {
 }
 
 impl HailoInputVStreams {
-    fn create(network_group: hailort::hailo_configured_network_group) -> Result<Self, String> {
+    fn create(
+        network_group: hailort::hailo_configured_network_group,
+    ) -> Result<Self, RuntimeError> {
         let capacity = hailort::HAILO_MAX_STREAMS_COUNT as usize;
 
         let mut params = vec![hailort::hailo_input_vstream_params_by_name_t::default(); capacity];
@@ -231,17 +350,18 @@ impl HailoInputVStreams {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_make_input_vstream_params failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_make_input_vstream_params",
+                status,
+            });
         }
 
         if count > params.len() {
-            return Err(format!(
-                "HailoRT reported {count} input virtual streams, \
-                 but the capacity is {}",
-                params.len()
-            ));
+            return Err(RuntimeError::CountExceedsCapacity {
+                resource: "input virtual streams",
+                count,
+                capacity: params.len(),
+            });
         }
 
         params.truncate(count);
@@ -262,9 +382,10 @@ impl HailoInputVStreams {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_create_input_vstreams failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_create_input_vstreams",
+                status,
+            });
         }
 
         if handles.iter().any(|handle| handle.is_null()) {
@@ -273,17 +394,22 @@ impl HailoInputVStreams {
                 hailort::hailo_release_input_vstreams(handles.as_mut_ptr(), handles.len());
             }
 
-            return Err("hailo_create_input_vstreams returned a null handle".to_string());
+            return Err(RuntimeError::NullHandle {
+                operation: "hailo_create_input_vstreams",
+            });
         }
 
         Ok(Self { handles })
     }
 
-    fn frame_size(&self, index: usize) -> Result<usize, String> {
+    fn frame_size(&self, index: usize) -> Result<usize, RuntimeError> {
         let handle = *self
             .handles
             .get(index)
-            .ok_or_else(|| format!("invalid input vstream index {index}"))?;
+            .ok_or(RuntimeError::InvalidVStreamIndex {
+                direction: "input",
+                index,
+            })?;
 
         let mut frame_size = 0usize;
 
@@ -292,27 +418,33 @@ impl HailoInputVStreams {
             unsafe { hailort::hailo_get_input_vstream_frame_size(handle, &mut frame_size) };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_get_input_vstream_frame_size failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_get_input_vstream_frame_size",
+                status,
+            });
         }
 
         Ok(frame_size)
     }
 
-    fn write(&self, index: usize, buffer: &[u8]) -> Result<(), String> {
+    fn write(&self, index: usize, buffer: &[u8]) -> Result<(), RuntimeError> {
         let handle = *self
             .handles
             .get(index)
-            .ok_or_else(|| format!("invalid input vstream index {index}"))?;
+            .ok_or(RuntimeError::InvalidVStreamIndex {
+                direction: "input",
+                index,
+            })?;
 
         let expected_size = self.frame_size(index)?;
 
         if buffer.len() != expected_size {
-            return Err(format!(
-                "input buffer is {} bytes; expected {expected_size} bytes",
-                buffer.len()
-            ));
+            return Err(RuntimeError::BufferSizeMismatch {
+                direction: "input",
+                index,
+                actual: buffer.len(),
+                expected: expected_size,
+            });
         }
 
         // SAFETY:
@@ -324,25 +456,32 @@ impl HailoInputVStreams {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_vstream_write_raw_buffer failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_vstream_write_raw_buffer",
+                status,
+            });
         }
 
         Ok(())
     }
 
-    fn flush(&self, index: usize) -> Result<(), String> {
+    fn flush(&self, index: usize) -> Result<(), RuntimeError> {
         let handle = *self
             .handles
             .get(index)
-            .ok_or_else(|| format!("invalid input vstream index {index}"))?;
+            .ok_or(RuntimeError::InvalidVStreamIndex {
+                direction: "input",
+                index,
+            })?;
 
         // SAFETY: handle is a valid input-vstream handle owned by self.
         let status = unsafe { hailort::hailo_flush_input_vstream(handle) };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!("hailo_flush_input_vstream failed: status={status}"));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_flush_input_vstream",
+                status,
+            });
         }
 
         Ok(())
@@ -383,7 +522,9 @@ pub(super) struct HailoVStreams {
 }
 
 impl HailoOutputVStreams {
-    fn create(network_group: hailort::hailo_configured_network_group) -> Result<Self, String> {
+    fn create(
+        network_group: hailort::hailo_configured_network_group,
+    ) -> Result<Self, RuntimeError> {
         let capacity = hailort::HAILO_MAX_STREAMS_COUNT as usize;
 
         let mut params = vec![hailort::hailo_output_vstream_params_by_name_t::default(); capacity];
@@ -404,17 +545,18 @@ impl HailoOutputVStreams {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_make_output_vstream_params failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_make_output_vstream_params",
+                status,
+            });
         }
 
         if count > params.len() {
-            return Err(format!(
-                "HailoRT reported {count} output virtual streams, \
-                 but the capacity is {}",
-                params.len()
-            ));
+            return Err(RuntimeError::CountExceedsCapacity {
+                resource: "output virtual streams",
+                count,
+                capacity: params.len(),
+            });
         }
 
         params.truncate(count);
@@ -435,9 +577,10 @@ impl HailoOutputVStreams {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_create_output_vstreams failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_create_output_vstreams",
+                status,
+            });
         }
 
         if handles.iter().any(|handle| handle.is_null()) {
@@ -445,17 +588,22 @@ impl HailoOutputVStreams {
                 hailort::hailo_release_output_vstreams(handles.as_mut_ptr(), handles.len());
             }
 
-            return Err("hailo_create_output_vstreams returned a null handle".to_string());
+            return Err(RuntimeError::NullHandle {
+                operation: "hailo_create_output_vstreams",
+            });
         }
 
         Ok(Self { handles })
     }
 
-    fn frame_size(&self, index: usize) -> Result<usize, String> {
+    fn frame_size(&self, index: usize) -> Result<usize, RuntimeError> {
         let handle = *self
             .handles
             .get(index)
-            .ok_or_else(|| format!("invalid output vstream index {index}"))?;
+            .ok_or(RuntimeError::InvalidVStreamIndex {
+                direction: "output",
+                index,
+            })?;
 
         let mut frame_size = 0usize;
 
@@ -464,27 +612,33 @@ impl HailoOutputVStreams {
             unsafe { hailort::hailo_get_output_vstream_frame_size(handle, &mut frame_size) };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_get_output_vstream_frame_size failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_get_output_vstream_frame_size",
+                status,
+            });
         }
 
         Ok(frame_size)
     }
 
-    fn read(&self, index: usize, buffer: &mut [u8]) -> Result<(), String> {
+    fn read(&self, index: usize, buffer: &mut [u8]) -> Result<(), RuntimeError> {
         let handle = *self
             .handles
             .get(index)
-            .ok_or_else(|| format!("invalid output vstream index {index}"))?;
+            .ok_or(RuntimeError::InvalidVStreamIndex {
+                direction: "output",
+                index,
+            })?;
 
         let expected_size = self.frame_size(index)?;
 
         if buffer.len() != expected_size {
-            return Err(format!(
-                "output buffer is {} bytes; expected {expected_size} bytes",
-                buffer.len()
-            ));
+            return Err(RuntimeError::BufferSizeMismatch {
+                direction: "output",
+                index,
+                actual: buffer.len(),
+                expected: expected_size,
+            });
         }
 
         // SAFETY:
@@ -496,9 +650,10 @@ impl HailoOutputVStreams {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_vstream_read_raw_buffer failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_vstream_read_raw_buffer",
+                status,
+            });
         }
 
         Ok(())
@@ -551,7 +706,7 @@ pub(super) struct HailoActivatedNetworkGroup {
 impl HailoActivatedNetworkGroup {
     pub(super) fn activate(
         network_group: hailort::hailo_configured_network_group,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, RuntimeError> {
         let mut handle: hailort::hailo_activated_network_group = std::ptr::null_mut();
 
         // SAFETY:
@@ -563,15 +718,16 @@ impl HailoActivatedNetworkGroup {
         };
 
         if status != hailort::hailo_status_HAILO_SUCCESS {
-            return Err(format!(
-                "hailo_activate_network_group failed: status={status}"
-            ));
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_activate_network_group",
+                status,
+            });
         }
 
         if handle.is_null() {
-            return Err("hailo_activate_network_group succeeded but returned \
-                 a null handle"
-                .to_string());
+            return Err(RuntimeError::NullHandle {
+                operation: "hailo_activate_network_group",
+            });
         }
 
         Ok(Self { handle })
@@ -605,32 +761,29 @@ pub(super) struct HailoConfiguredDevice {
 }
 
 impl HailoConfiguredDevice {
-    pub(super) fn first_network_group(&self) -> Result<hailort::hailo_configured_network_group> {
+    pub(super) fn first_network_group(
+        &self,
+    ) -> Result<hailort::hailo_configured_network_group, RuntimeError> {
         self.network_groups
             .first()
             .copied()
-            .context("no configured network groups were returned")
+            .ok_or(RuntimeError::NoConfiguredNetworkGroups)
     }
 }
 
 impl HailoConfiguredDevice {
-    pub(super) fn open_and_configure(hef: &HailoHef) -> Result<Self> {
+    pub(super) fn open_and_configure(hef: &HailoHef) -> Result<Self, RuntimeError> {
         println!("Opening an available Hailo device");
 
-        let device = HailoDevice::open_any()
-            .map_err(anyhow::Error::msg)
-            .context("failed to open an available Hailo device")?;
+        let device = HailoDevice::open_any()?;
 
         println!("Hailo device opened successfully");
         println!("Configuring the Hailo device from the HEF");
 
-        let network_groups = device
-            .configure(hef)
-            .map_err(anyhow::Error::msg)
-            .context("failed to configure the Hailo device from the HEF")?;
+        let network_groups = device.configure(hef)?;
 
         if network_groups.is_empty() {
-            anyhow::bail!("no configured network groups were returned");
+            return Err(RuntimeError::NoConfiguredNetworkGroups);
         }
 
         println!("Configured network groups: {}", network_groups.len());
@@ -649,41 +802,27 @@ impl HailoConfiguredDevice {
 impl HailoVStreams {
     pub(super) fn create_and_describe(
         network_group: hailort::hailo_configured_network_group,
-    ) -> Result<Self> {
+    ) -> Result<Self, RuntimeError> {
         println!("Creating input virtual streams");
 
-        let input = HailoInputVStreams::create(network_group)
-            .map_err(anyhow::Error::msg)
-            .context("failed to create input virtual streams")?;
+        let input = HailoInputVStreams::create(network_group)?;
 
         println!("Input virtual streams created: {}", input.handles.len());
 
         for index in 0..input.handles.len() {
-            let frame_size = input
-                .frame_size(index)
-                .map_err(anyhow::Error::msg)
-                .with_context(|| {
-                    format!("failed to obtain frame size for input virtual stream {index}")
-                })?;
+            let frame_size = input.frame_size(index)?;
 
             println!("  input[{index}] frame size={frame_size} bytes");
         }
 
         println!("Creating output virtual streams");
 
-        let output = HailoOutputVStreams::create(network_group)
-            .map_err(anyhow::Error::msg)
-            .context("failed to create output virtual streams")?;
+        let output = HailoOutputVStreams::create(network_group)?;
 
         println!("Output virtual streams created: {}", output.handles.len());
 
         for index in 0..output.handles.len() {
-            let frame_size = output
-                .frame_size(index)
-                .map_err(anyhow::Error::msg)
-                .with_context(|| {
-                    format!("failed to obtain frame size for output virtual stream {index}")
-                })?;
+            let frame_size = output.frame_size(index)?;
 
             println!("  output[{index}] frame size={frame_size} bytes");
         }
@@ -699,23 +838,23 @@ impl HailoVStreams {
         self.output.handles.len()
     }
 
-    pub(super) fn input_frame_size(&self, index: usize) -> Result<usize, String> {
+    pub(super) fn input_frame_size(&self, index: usize) -> Result<usize, RuntimeError> {
         self.input.frame_size(index)
     }
 
-    pub(super) fn output_frame_size(&self, index: usize) -> Result<usize, String> {
+    pub(super) fn output_frame_size(&self, index: usize) -> Result<usize, RuntimeError> {
         self.output.frame_size(index)
     }
 
-    pub(super) fn write_input(&self, index: usize, buffer: &[u8]) -> Result<(), String> {
+    pub(super) fn write_input(&self, index: usize, buffer: &[u8]) -> Result<(), RuntimeError> {
         self.input.write(index, buffer)
     }
 
-    pub(super) fn read_output(&self, index: usize, buffer: &mut [u8]) -> Result<(), String> {
+    pub(super) fn read_output(&self, index: usize, buffer: &mut [u8]) -> Result<(), RuntimeError> {
         self.output.read(index, buffer)
     }
 
-    pub(super) fn flush_input(&self, index: usize) -> Result<(), String> {
+    pub(super) fn flush_input(&self, index: usize) -> Result<(), RuntimeError> {
         self.input.flush(index)
     }
 }

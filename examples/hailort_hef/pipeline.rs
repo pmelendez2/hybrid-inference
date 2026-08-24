@@ -102,7 +102,6 @@ pub(super) fn run_inference(
 
     {
         let _activation = HailoActivatedNetworkGroup::activate(network_group)
-            .map_err(anyhow::Error::msg)
             .context("failed to activate the network group.")?;
 
         process_image(
