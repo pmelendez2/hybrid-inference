@@ -38,7 +38,25 @@ mod hailort {
     include!(concat!(env!("OUT_DIR"), "/hailort_bindings.rs"));
 }
 
-fn main() -> Result<()> {
+fn print_error_chain(error: &dyn std::error::Error) {
+    eprintln!("error: {error}");
+
+    let mut source = error.source();
+
+    while let Some(cause) = source {
+        eprintln!("caused by: {cause}");
+        source = cause.source();
+    }
+}
+
+fn main() {
+    if let Err(error) = run() {
+        print_error_chain(error.as_ref());
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     let hef_path = cli.hef;
