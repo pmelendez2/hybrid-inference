@@ -25,7 +25,7 @@ mod cli;
 use anyhow::Result;
 use clap::Parser;
 
-use cli::{Cli, validate_readable_file};
+use cli::{Cli, validate_image_pairs, validate_readable_file};
 use pipeline::run_inference;
 
 #[allow(
@@ -60,14 +60,25 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     let hef_path = cli.hef;
-    let image_path = cli.input;
-    let output_path = cli.output;
+    let image_paths = cli.input;
+    let output_paths = cli.output;
     let confidence_threshold = cli.confidence;
 
     validate_readable_file(&hef_path, "HEF file")?;
-    validate_readable_file(&image_path, "input image")?;
 
-    run_inference(&hef_path, &image_path, &output_path, confidence_threshold)?;
+    validate_image_pairs(&image_paths, &output_paths)?;
+
+    for image_path in &image_paths {
+        validate_readable_file(image_path, "input image")?;
+    }
+
+    let images: Vec<(&str, &str)> = image_paths
+        .iter()
+        .zip(&output_paths)
+        .map(|(input, output)| (input.as_str(), output.as_str()))
+        .collect();
+
+    run_inference(&hef_path, &images, confidence_threshold)?;
 
     Ok(())
 }
@@ -78,6 +89,7 @@ mod tests {
         PixelBoundingBox, annotate_image, detection_label_y, format_detection_label,
         is_valid_bounding_box, map_detection_to_original,
     };
+    use super::cli::validate_image_pairs;
     use super::inference::{InferenceContract, derive_inference_contract};
     use super::model::ModelMetadata;
     use super::postprocessing::{
@@ -120,6 +132,32 @@ mod tests {
             pad_x,
             pad_y,
         }
+    }
+
+    #[test]
+    fn accepts_matching_input_output_counts() {
+        let inputs = vec![String::from("input-1.jpg"), String::from("input-2.jpg")];
+
+        let outputs = vec![String::from("output-1.jpg"), String::from("output-2.jpg")];
+
+        validate_image_pairs(&inputs, &outputs)
+            .expect("matching input and output counts should succeed");
+    }
+
+    #[test]
+    fn rejects_mismatched_input_output_counts() {
+        let inputs = vec![String::from("input-1.jpg"), String::from("input-2.jpg")];
+
+        let outputs = vec![String::from("output-1.jpg")];
+
+        let error = validate_image_pairs(&inputs, &outputs)
+            .expect_err("mismatched input and output counts should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("received 2 input(s) and 1 output(s)")
+        );
     }
 
     fn valid_detection() -> Detection {

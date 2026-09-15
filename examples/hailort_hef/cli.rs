@@ -34,6 +34,10 @@ pub(super) enum CliError {
         path: String,
         source: io::Error,
     },
+    InputOutputCountMismatch {
+        input_count: usize,
+        output_count: usize,
+    },
 }
 
 impl fmt::Display for CliError {
@@ -68,6 +72,14 @@ impl fmt::Display for CliError {
                 formatter,
                 "{description} '{path}' cannot be opened for reading: {source}"
             ),
+            Self::InputOutputCountMismatch {
+                input_count,
+                output_count,
+            } => write!(
+                formatter,
+                "each input image requires one output path; received \
+                {input_count} input(s) and {output_count} output(s)"
+            ),
         }
     }
 }
@@ -78,7 +90,9 @@ impl Error for CliError {
             Self::InvalidConfidenceThreshold { source, .. } => Some(source),
             Self::FileCannotBeAccessed { source, .. }
             | Self::FileCannotBeOpenedForReading { source, .. } => Some(source),
-            Self::ConfidenceThresholdOutOfRange { .. } | Self::NotARegularFile { .. } => None,
+            Self::ConfidenceThresholdOutOfRange { .. }
+            | Self::NotARegularFile { .. }
+            | Self::InputOutputCountMismatch { .. } => None,
         }
     }
 }
@@ -105,20 +119,20 @@ fn parse_confidence_threshold(value: &str) -> Result<f32, CliError> {
 #[command(
     name = "hailort-hef",
     version,
-    about = "Run YOLOv8 inference on a Hailo-8 device and annotate an image"
+    about = "Run YOLOv8 inference on a Hailo-8 device and annotate one or more images"
 )]
 pub(super) struct Cli {
     /// Path to the Hailo executable format model
     #[arg(long, value_name = "FILE", default_value = DEFAULT_HEF_PATH)]
     pub(super) hef: String,
 
-    /// Path to the input image
+    /// Path to the input image; may be specified more than once
     #[arg(short, long, value_name = "FILE", default_value = DEFAULT_IMAGE_PATH)]
-    pub(super) input: String,
+    pub(super) input: Vec<String>,
 
-    /// Path for the annotated output image
+    /// Path for the annotated output image; specify once per input image
     #[arg(short, long, value_name = "FILE", default_value = DEFAULT_OUTPUT_PATH)]
-    pub(super) output: String,
+    pub(super) output: Vec<String>,
 
     /// Minimum detection confidence from 0.0 through 1.0
     #[arg(
@@ -129,6 +143,17 @@ pub(super) struct Cli {
         value_parser = parse_confidence_threshold
     )]
     pub(super) confidence: f32,
+}
+
+pub(super) fn validate_image_pairs(inputs: &[String], outputs: &[String]) -> Result<(), CliError> {
+    if inputs.len() != outputs.len() {
+        return Err(CliError::InputOutputCountMismatch {
+            input_count: inputs.len(),
+            output_count: outputs.len(),
+        });
+    }
+
+    Ok(())
 }
 
 pub(super) fn validate_readable_file(path: &str, description: &str) -> Result<(), CliError> {

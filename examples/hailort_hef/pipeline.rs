@@ -84,10 +84,28 @@ fn process_image(
     )
 }
 
+fn process_images(
+    vstreams: &HailoVStreams,
+    metadata: &ModelMetadata,
+    images: &[(&str, &str)],
+    confidence_threshold: f32,
+) -> Result<()> {
+    for (image_path, output_path) in images {
+        process_image(
+            vstreams,
+            metadata,
+            image_path,
+            output_path,
+            confidence_threshold,
+        )?;
+    }
+
+    Ok(())
+}
+
 pub(super) fn run_inference(
     hef_path: &str,
-    image_path: &str,
-    output_path: &str,
+    images: &[(&str, &str)],
     confidence_threshold: f32,
 ) -> Result<()> {
     println!("Confidence threshold: {confidence_threshold:.2}");
@@ -103,14 +121,7 @@ pub(super) fn run_inference(
     {
         let _activation = HailoActivatedNetworkGroup::activate(network_group)
             .context("failed to activate the network group.")?;
-
-        process_image(
-            &vstreams,
-            &model.metadata,
-            image_path,
-            output_path,
-            confidence_threshold,
-        )?;
+        process_images(&vstreams, &model.metadata, images, confidence_threshold)?;
     }
 
     println!("Network group deactivated successfully");
