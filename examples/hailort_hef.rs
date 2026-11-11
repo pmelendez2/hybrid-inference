@@ -63,6 +63,8 @@ fn run() -> Result<()> {
     let image_paths = cli.input;
     let output_paths = cli.output;
     let confidence_threshold = cli.confidence;
+    let multi_process_service = cli.multi_process_service;
+    let group_id = cli.group_id;
 
     validate_readable_file(&hef_path, "HEF file")?;
 
@@ -78,7 +80,13 @@ fn run() -> Result<()> {
         .map(|(input, output)| (input.as_str(), output.as_str()))
         .collect();
 
-    run_inference(&hef_path, &images, confidence_threshold)?;
+    run_inference(
+        &hef_path,
+        &images,
+        confidence_threshold,
+        multi_process_service,
+        &group_id,
+    )?;
 
     Ok(())
 }
