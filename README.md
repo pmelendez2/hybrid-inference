@@ -3,14 +3,12 @@
 Rust experiments and examples for local AI inference, including Hailo-8
 inference through HailoRT and interaction with an Ollama server.
 
-The repository keeps two distinct lines of development:
+The `master` branch supports both direct-device inference and optional HailoRT
+multi-process service (MPS) inference for shared Hailo-8 environments.
 
-- `master`: the original non-MPS implementation.
-- `feature/hailort-mps-support`: optional HailoRT multi-process service
-  (MPS) support, intended for a shared Hailo-8 environment.
-
-The MPS branch retains direct-device operation as its default. Its HEF example
-adds `--multi-process-service` and `--group-id` (default `SHARED`).
+Direct-device mode remains the default. The HEF example supports
+`--multi-process-service` and `--group-id` (default `SHARED`).
+See [Testing](TESTING.md) for verified hardware results.
 
 ## Requirements
 

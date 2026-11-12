@@ -68,3 +68,37 @@ shared Hailo-8 service,
 but the final publication checks above did **not** repeat that hardware
 inference run. Do not claim device concurrency was revalidated by the unit
 suite alone.
+
+## Verified on November 12, 2026
+
+Hardware inference was tested on a Raspberry Pi 5 (`picam`) with a
+Hailo-8 accelerator and HailoRT 4.23.0 using the existing Rust HEF example.
+The checkout at commit `4935d7f` was clean and synchronized with
+`origin/master`; reported GitHub CI runs were successful.
+
+| Test | Result |
+| --- | --- |
+| HailoRT device scan | Hailo-8 PCIe device detected |
+| HailoRT MPS service | Active |
+| MPS socket | Group `hailort`, mode `660` |
+| Development container | ARM64, `rust-ai-dev:1.99` |
+| HEF model | YOLOv8n for Hailo-8 |
+| MPS group | `SHARED` |
+| `culdesac-latest.jpg` | Inference succeeded; zero detections at 0.50 |
+| `snowflake_headshot.jpg` | One person detected at 0.50 |
+| Person confidence | 0.862 |
+| Annotated output | Valid 257 x 367 JPEG |
+| Inference process exit code | 0 |
+| Frigate post-inference check | Running, healthy |
+| HailoRT post-inference check | Active |
+| MPS service errors in checked journal window | None reported |
+
+Both tests loaded the HEF, configured the network group, created virtual
+streams, preprocessed the input, wrote the input frame, read the output,
+and saved an annotated JPEG. The person detection also verified functional
+YOLOv8 output decoding and coordinate mapping.
+
+Frigate was healthy when checked after the first inference test, but
+simultaneous Frigate inference activity was not independently measured.
+These results do not establish general model accuracy or compatibility
+with every HailoRT release.

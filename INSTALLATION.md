@@ -194,9 +194,9 @@ docker exec INFERENCE_CONTAINER \
     /run/hailort/hailort_uds.sock
 ```
 
-When using MPS with the Rust HEF example on
-`feature/hailort-mps-support`, pass `--multi-process-service` and use the
-same `--group-id SHARED` across clients intended to share a device. Inspect
+When using MPS with the Rust HEF example on `master`, pass
+`--multi-process-service` and use the same `--group-id SHARED` across
+clients intended to share a device. Inspect
 `cargo run --example hailort_hef -- --help` for model, input, and other
 required options. Direct-device mode remains the default; it is not
 interchangeable with shared MPS operation while another process owns the
@@ -211,14 +211,14 @@ git clone https://github.com/pmelendez2/hybrid-inference.git
 cd hybrid-inference
 ```
 
-For a pre-existing checkout, navigate to its repository root. Select the
-intended branch when needed:
+For a pre-existing checkout, navigate to its repository root and select
+the current mainline branch:
 
 ```bash
 git switch master
-# Or, for optional MPS support:
-git switch feature/hailort-mps-support
 ```
+
+Both direct-device and optional MPS inference are available on `master`.
 
 On a host/container with matching HailoRT headers and libraries:
 
