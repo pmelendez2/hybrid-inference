@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - feature/hailort-mps-support
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated:
+    name: isolated
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out complete Git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify shell syntax
+        shell: bash
+        run: |
+          bash -n \
+            .githooks/pre-commit \
+            .githooks/pre-push \
+            scripts/check-publish.sh \
+            scripts/test-arm64.sh
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Verify commit whitespace
+        shell: bash
+        run: |
+          git show --format= --check HEAD
+
+      - name: Install verified Gitleaks release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          asset="gitleaks_${version}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${version}"
+          curl -fsSL --retry 3 "${base}/${asset}" -o "/tmp/${asset}"
+          digest="$(
+            curl -fsSL --retry 3 \
+              "https://api.github.com/repos/gitleaks/gitleaks/releases/tags/v${version}" |
+              jq -r --arg asset "$asset" \
+                '.assets[] | select(.name == $asset) | .digest'
+          )"
+          [[ "$digest" == sha256:* ]] || exit 1
+          printf '%s  %s\n' "${digest#sha256:}" "/tmp/${asset}" |
+            sha256sum --check
+          mkdir -p /tmp/gitleaks-ci
+          tar -xzf "/tmp/${asset}" -C /tmp/gitleaks-ci gitleaks
+          echo /tmp/gitleaks-ci >> "$GITHUB_PATH"
+
+      - name: Scan Git history for secrets
+        run: gitleaks git --log-opts='--all' --redact .
+
+      - name: Scan working directory for secrets
+        run: gitleaks dir --redact .
+
+      - name: Scan historical private infrastructure references
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Exclude the historical scanner's own regex definition.
+          # The fragments avoid flagging this workflow as an example value.
+          pattern='tec''ocllc|\.home''\.arpa|\.''local|192''\.168\.|10\.[0-9]+\.[0-9]+\.'
+          if git grep -q -I -E "$pattern" \
+              $(git rev-list --all) -- \
+              ':!Cargo.lock' ':!scripts/check-publish.sh'; then
+            echo 'Private infrastructure references detected'
+            exit 1
+          fi
+
+      - name: ARM64 hardware validation guidance
+        shell: bash
+        run: |
+          echo 'Hosted CI does not have the HailoRT SDK or Hailo-8 device.'
+          echo 'Maintainers must separately run ./scripts/check-publish.sh'
+          echo 'on their configured native ARM64 environment before push.'

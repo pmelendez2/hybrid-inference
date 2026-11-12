@@ -1,70 +1,55 @@
-# Secure publication workflow
+# Publishing workflow
 
-Public GitHub publication is deliberate, never automatic.
-This repository retains `master` (non-MPS) and
-`feature/hailort-mps-support` (MPS) until reviewed through a PR.
+Public publication is deliberate, never automatic. The `master` branch
+contains the non-MPS baseline; `feature/hailort-mps-support` adds MPS support.
+Use signed commits, pull requests and server-side branch protection.
 
-## Setup on sparta
+## Local Git configuration
 
-Configure this clone (not global Git configuration):
+Enable repository hooks and configure a reachable native ARM64 test host and
+an ARM64 Rust/HailoRT development container using the local Git configuration.
+The host and container checkout locations are independent and configurable;
+no specific machine names, filesystem paths or shared mounts are assumed.
 
 ```bash
 git config --local core.hooksPath .githooks
-git config --local hybrid.arm64Host picam
+git config --local hybrid.arm64Host YOUR_SSH_HOST
+git config --local hybrid.arm64Container YOUR_CONTAINER
+git config --local hybrid.arm64HostRepo /absolute/path/on/host
+git config --local hybrid.arm64ContainerRepo /absolute/path/in/container
 ```
 
-Identify the running ARM64 `aihailo` container on picam:
+Run `./scripts/check-publish.sh` from the repository root. The script
+requires a clean working tree, committed whitespace and formatting checks,
+Git-history and working-directory Gitleaks scans, a private-infrastructure
+scan and successful native ARM64 compilation and unit tests. It verifies
+the exact commit in both checkouts. See [CI setup](CI_SETUP.md).
 
-```bash
-ssh picam 'docker ps --format "{{.Names}} {{.Image}}"'
-```
+## Hooks
 
-Set its exact name (replace the example value):
+- `pre-commit` validates staged changes before permitting a signed commit.
+- `pre-push` refuses deletions, tags, non-current-branch pushes and direct
+  updates to an existing remote `master`.
+- Initial publication of `master` is allowed only if the remote does not
+  yet have that branch.
+- Every push requires preflight checks and the exact interactive word
+  `PUBLISH`; otherwise it is rejected.
 
-```bash
-git config --local hybrid.arm64Container YOUR_AIHAILO_CONTAINER
-```
+Switch to each branch before its first push so the exact pushed revision is
+verified. Never bypass the hooks merely to publish. After bootstrapping the
+remote, use a PR to update the default branch.
 
-The ARM64 test script verifies host architecture, the container architecture,
-Rust's native target, and that the checkout commit on picam and inside the
-container matches sparta. It then runs `cargo fmt --all --check`,
-`cargo build --all-targets` and `cargo test --all-targets` inside that
-container. No x86 fallback or no-op command is available.
+## GitHub CI and branch protection
 
-The NFS checkout is expected at `$HOME/src/ai-rust/hybrid_inference` on
-picam, mounted in the container as `/workspace/hybrid_inference`.
+The `isolated` GitHub Actions job provides portable syntax, formatting and
+security checks. It does **not** verify compilation against the HailoRT SDK
+or live device inference. ARM64 compilation/tests are required separately by
+the local publication preflight.
 
-## Hooks and checks
+After bootstrapping the repository, configure a ruleset for `master` requiring
+pull requests and the successful `isolated` check. Disable force pushes and
+branch deletion. Never attach private hardware as an unrestricted runner for
+untrusted public pull requests.
 
-- Pre-commit rejects staged whitespace, Rust formatting errors, and staged
-  Gitleaks findings.
-- Pre-push refuses deletions, tag pushes, non-current branches, and direct
-  updates to an existing `master` branch.
-- The initial `master` push is allowed only if the remote lacks `master`.
-- Pre-push runs `scripts/check-publish.sh` before asking for the exact
-  interactive word `PUBLISH`; anything else rejects the push.
-- The full check includes Git-history and working-tree Gitleaks scans,
-  a targeted private infrastructure search, and required native ARM64
-  compilation and tests.
-
-Run checks manually from the repository root:
-
-```bash
-./scripts/check-publish.sh
-```
-
-To publish both branches, **switch to each branch before its push**, so that
-ARM64 checks run against the exact commit being published. The safeguards
-must be committed on both branches before publishing either branch.
-
-## Signed commits, PRs, and CI
-
-Commit using signed Git commits on sparta. After the first remote bootstrap,
-all changes to `master` must go through a pull request. Configure GitHub
-branch protection and required CI before accepting outside contributions.
-
-Local hooks only protect clones that enable `core.hooksPath`; they can be
-bypassed and are not a substitute for GitHub branch protection.
-
-Git history rewriting invalidates old commit signatures. Verify rewritten
-commit signatures separately. Never commit local `.env` files or reports.
+Git history rewriting invalidates commit signatures. Verify newly written
+commit signatures. Do not commit private environment settings or reports.
