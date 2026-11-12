@@ -143,6 +143,21 @@ pub(super) struct Cli {
         value_parser = parse_confidence_threshold
     )]
     pub(super) confidence: f32,
+
+    /// Use HailoRT's shared multi-process VDevice service.
+    #[arg(long, default_value_t = false)]
+    pub(super) multi_process_service: bool,
+
+    /// Shared VDevice group ID (used with --multi-process-service).
+    #[arg(long, default_value = "SHARED", value_parser = validate_group_id)]
+    pub(super) group_id: String,
+}
+
+fn validate_group_id(value: &str) -> Result<String, String> {
+    if value.is_empty() || value.as_bytes().contains(&0) {
+        return Err("group ID must be nonempty and contain no NUL bytes".into());
+    }
+    Ok(value.to_owned())
 }
 
 pub(super) fn validate_image_pairs(inputs: &[String], outputs: &[String]) -> Result<(), CliError> {

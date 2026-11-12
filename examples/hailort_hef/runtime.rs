@@ -6,6 +6,7 @@ use super::hailort;
 
 #[derive(Debug)]
 pub(super) enum RuntimeError {
+    GroupIdContainsNullByte,
     HefPathContainsNullByte {
         path: String,
     },
@@ -47,6 +48,7 @@ pub(super) enum RuntimeError {
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::GroupIdContainsNullByte => write!(f, "VDevice group ID contains a NUL byte"),
             Self::HefPathContainsNullByte { path } => {
                 write!(f, "HEF path contains a null byte: {path}")
             }
@@ -319,6 +321,111 @@ impl HailoDevice {
         }
 
         Ok(network_groups)
+    }
+}
+
+// Owns a service-backed VDevice. Do not treat it as a physical device.
+struct HailoVDevice {
+    handle: hailort::hailo_vdevice,
+}
+
+impl HailoVDevice {
+    fn open_shared(group_id: &str) -> Result<Self, RuntimeError> {
+        let group = CString::new(group_id).map_err(|_| RuntimeError::GroupIdContainsNullByte)?;
+        let mut params = hailort::hailo_vdevice_params_t::default();
+        let status = unsafe { hailort::hailo_init_vdevice_params(&mut params) };
+        if status != hailort::hailo_status_HAILO_SUCCESS {
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_init_vdevice_params",
+                status,
+            });
+        }
+        // HailoRT 4.23: ROUND_ROBIN = 1 in hailo_scheduling_algorithm_e.
+        params.scheduling_algorithm = 1 as _;
+        params.multi_process_service = true;
+        params.group_id = group.as_ptr();
+        let mut handle: hailort::hailo_vdevice = ptr::null_mut();
+        // HailoRT consumes the group ID during this call.
+        let status = unsafe { hailort::hailo_create_vdevice(&mut params, &mut handle) };
+        if status != hailort::hailo_status_HAILO_SUCCESS {
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_create_vdevice",
+                status,
+            });
+        }
+        if handle.is_null() {
+            return Err(RuntimeError::NullHandle {
+                operation: "hailo_create_vdevice",
+            });
+        }
+        Ok(Self { handle })
+    }
+
+    fn configure(
+        &self,
+        hef: &HailoHef,
+    ) -> Result<Vec<hailort::hailo_configured_network_group>, RuntimeError> {
+        let capacity = hailort::HAILO_MAX_NETWORK_GROUPS as usize;
+        let mut network_groups = vec![ptr::null_mut(); capacity];
+        let mut count = network_groups.len();
+        let status = unsafe {
+            hailort::hailo_configure_vdevice(
+                self.handle,
+                hef.handle,
+                ptr::null_mut(),
+                network_groups.as_mut_ptr(),
+                &mut count,
+            )
+        };
+        if status != hailort::hailo_status_HAILO_SUCCESS {
+            return Err(RuntimeError::HailoRtCallFailed {
+                operation: "hailo_configure_vdevice",
+                status,
+            });
+        }
+        if count > network_groups.len() {
+            return Err(RuntimeError::CountExceedsCapacity {
+                resource: "configured network groups",
+                count,
+                capacity: network_groups.len(),
+            });
+        }
+        network_groups.truncate(count);
+        if network_groups.iter().any(|handle| handle.is_null()) {
+            return Err(RuntimeError::NullHandle {
+                operation: "hailo_configure_vdevice",
+            });
+        }
+        Ok(network_groups)
+    }
+}
+
+impl Drop for HailoVDevice {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            let status = unsafe { hailort::hailo_release_vdevice(self.handle) };
+            if status != hailort::hailo_status_HAILO_SUCCESS {
+                eprintln!("hailo_release_vdevice failed during cleanup: status={status}");
+            }
+            self.handle = ptr::null_mut();
+        }
+    }
+}
+
+enum DeviceHandle {
+    Physical(HailoDevice),
+    Shared(HailoVDevice),
+}
+
+impl DeviceHandle {
+    fn configure(
+        &self,
+        hef: &HailoHef,
+    ) -> Result<Vec<hailort::hailo_configured_network_group>, RuntimeError> {
+        match self {
+            Self::Physical(device) => device.configure(hef),
+            Self::Shared(device) => device.configure(hef),
+        }
     }
 }
 
@@ -756,7 +863,7 @@ impl Drop for HailoActivatedNetworkGroup {
 
 pub(super) struct HailoConfiguredDevice {
     // Retained so the device outlives every configured-network-group handle.
-    _device: HailoDevice,
+    _device: DeviceHandle,
     network_groups: Vec<hailort::hailo_configured_network_group>,
 }
 
@@ -772,10 +879,19 @@ impl HailoConfiguredDevice {
 }
 
 impl HailoConfiguredDevice {
-    pub(super) fn open_and_configure(hef: &HailoHef) -> Result<Self, RuntimeError> {
-        println!("Opening an available Hailo device");
+    pub(super) fn open_and_configure(
+        hef: &HailoHef,
+        multi_process_service: bool,
+        group_id: &str,
+    ) -> Result<Self, RuntimeError> {
+        println!("Opening a Hailo device");
 
-        let device = HailoDevice::open_any()?;
+        let device = if multi_process_service {
+            println!("Using HailoRT multi-process service (group {group_id})");
+            DeviceHandle::Shared(HailoVDevice::open_shared(group_id)?)
+        } else {
+            DeviceHandle::Physical(HailoDevice::open_any()?)
+        };
 
         println!("Hailo device opened successfully");
         println!("Configuring the Hailo device from the HEF");

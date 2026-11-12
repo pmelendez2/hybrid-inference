@@ -107,24 +107,29 @@ pub(super) fn run_inference(
     hef_path: &str,
     images: &[(&str, &str)],
     confidence_threshold: f32,
+    multi_process_service: bool,
+    group_id: &str,
 ) -> Result<()> {
     println!("Confidence threshold: {confidence_threshold:.2}");
 
     let model = LoadedModel::load_and_describe(hef_path)?;
 
-    let configured_device = HailoConfiguredDevice::open_and_configure(&model.hef)?;
+    let configured_device =
+        HailoConfiguredDevice::open_and_configure(&model.hef, multi_process_service, group_id)?;
     let network_group = configured_device.first_network_group()?;
 
     let vstreams = HailoVStreams::create_and_describe(network_group)?;
     validate_inference_contract(&model.metadata, &vstreams)?;
 
-    {
+    if multi_process_service {
+        // The service scheduler handles network-group activation.
+        process_images(&vstreams, &model.metadata, images, confidence_threshold)?;
+    } else {
         let _activation = HailoActivatedNetworkGroup::activate(network_group)
             .context("failed to activate the network group.")?;
         process_images(&vstreams, &model.metadata, images, confidence_threshold)?;
+        println!("Network group deactivated successfully");
     }
-
-    println!("Network group deactivated successfully");
 
     println!(
         "The virtual streams, configured network group, device, and HEF \
