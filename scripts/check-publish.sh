@@ -26,9 +26,12 @@ printf '[check] working directory: Gitleaks\n'
 gitleaks dir --redact . || fail 'Working tree secret scan failed'
 
 printf '[check] Git history: private infrastructure identifiers\n'
+
 if git grep -q -I -E \
     'tecocllc|\.home\.arpa|\.local|192\.168\.|10\.[0-9]+\.[0-9]+\.' \
-    $(git rev-list --all) -- ':!Cargo.lock'; then
+    $(git rev-list --all) -- \
+    ':!Cargo.lock' \
+    ':!scripts/check-publish.sh'; then
     fail 'Private infrastructure references remain in history'
 fi
 
