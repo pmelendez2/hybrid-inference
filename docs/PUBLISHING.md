@@ -1,7 +1,7 @@
 # Publishing workflow
 
 Public publication is deliberate, never automatic. The `master` branch
-contains the non-MPS baseline; `feature/hailort-mps-support` adds MPS support.
+supports direct-device inference and optional HailoRT MPS inference.
 Use signed commits, pull requests and server-side branch protection.
 
 ## Local Git configuration
