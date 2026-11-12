@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fail closed: no publication without local security and native ARM64 checks.
+# Fail closed: no publication without security and native ARM64 checks.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
@@ -26,7 +26,6 @@ printf '[check] working directory: Gitleaks\n'
 gitleaks dir --redact . || fail 'Working tree secret scan failed'
 
 printf '[check] Git history: private infrastructure identifiers\n'
-
 if git grep -q -I -E \
     'tecocllc|\.home\.arpa|\.local|192\.168\.|10\.[0-9]+\.[0-9]+\.' \
     $(git rev-list --all) -- \
@@ -35,7 +34,7 @@ if git grep -q -I -E \
     fail 'Private infrastructure references remain in history'
 fi
 
-printf '[check] ARM64 compilation and tests on picam\n'
+printf '[check] Native ARM64 compilation and tests\n'
 "$(git rev-parse --show-toplevel)/scripts/test-arm64.sh" || \
     fail 'ARM64 validation failed'
 
