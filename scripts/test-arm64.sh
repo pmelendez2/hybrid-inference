@@ -48,7 +48,9 @@ fail() { printf 'FAIL (aihailo): %s\n' "$*" >&2; exit 1; }
     fail 'Rust toolchain is not native aarch64-unknown-linux-gnu'
 
 cd /workspace/hybrid_inference || fail 'Missing container checkout'
-[[ "$(git rev-parse HEAD)" == "$expected" ]] || \
+
+[[ "$(git -c safe.directory=/workspace/hybrid_inference \
+    rev-parse HEAD)" == "$expected" ]] || \
     fail 'Container checkout differs from sparta'
 
 cargo fmt --all --check || fail 'Formatting failed'
