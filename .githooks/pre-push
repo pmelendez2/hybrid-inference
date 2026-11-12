@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Refuse all Git pushes without explicit interactive approval and checks.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+remote_name="${1:-}"
+[[ -n "$remote_name" ]] || {
+    echo 'FAIL: Missing remote name' >&2
+    exit 1
+}
+
+updates=()
+while IFS= read -r update; do
+    [[ -n "$update" ]] && updates+=("$update")
+done
+[[ ${#updates[@]} -gt 0 ]] || {
+    echo 'FAIL: No ref updates; refusing' >&2
+    exit 1
+}
+
+for update in "${updates[@]}"; do
+    read -r local_ref local_sha remote_ref remote_sha <<< "$update"
+    [[ "$local_sha" =~ ^0+$ ]] && {
+        echo 'FAIL: Ref deletion not allowed' >&2
+        exit 1
+    }
+    if [[ "$remote_ref" == refs/heads/master &&
+          ! "$remote_sha" =~ ^0+$ ]]; then
+        echo 'FAIL: Direct master updates are prohibited; use PR.' >&2
+        exit 1
+    fi
+    if [[ "$remote_ref" == refs/heads/master &&
+          "$remote_sha" =~ ^0+$ ]]; then
+        echo 'Initial master bootstrap is permitted after checks.'
+    fi
+    if [[ "$local_ref" == refs/heads/* ]]; then
+        branch="${local_ref#refs/heads/}"
+        [[ "$branch" == "$(git branch --show-current)" ]] || {
+            echo "FAIL: Switch to $branch to test its exact commit." >&2
+            exit 1
+        }
+        [[ "$local_sha" == "$(git rev-parse HEAD)" ]] || {
+            echo 'FAIL: The pushed branch must match HEAD.' >&2
+            exit 1
+        }
+    else
+        echo 'FAIL: Only branch pushes are supported; no tags.' >&2
+        exit 1
+    fi
+done
+
+"$(git rev-parse --show-toplevel)/scripts/check-publish.sh" || exit 1
+
+if [[ ! -r /dev/tty ]]; then
+    echo 'FAIL: Interactive terminal required for PUBLISH' >&2
+    exit 1
+fi
+printf '\nPush to %s? Type PUBLISH: ' "$remote_name" > /dev/tty
+IFS= read -r approval < /dev/tty || exit 1
+[[ "$approval" == PUBLISH ]] || {
+    echo 'FAIL: Publication not approved' >&2
+    exit 1
+}

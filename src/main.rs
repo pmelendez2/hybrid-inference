@@ -16,11 +16,7 @@ struct Cli {
     model: String,
 
     /// Base URL of the Ollama server.
-    #[arg(
-        long,
-        env = "OLLAMA_HOST",
-        default_value = "http://localhost:11434"
-    )]
+    #[arg(long, env = "OLLAMA_HOST", default_value = "http://localhost:11434")]
     ollama_host: String,
 
     /// Prompt sent to the language model.
