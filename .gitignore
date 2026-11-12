@@ -1,3 +1,33 @@
+# Rust build products
 /target/
 /output/
-hailort.log
+
+# HailoRT runtime diagnostics
+/hailort.log
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+
+# Local security reports
+/gitleaks-report.*
+/.gitleaks-report.*
+
+# Editors and crash dumps
+*.swp
+*.swo
+*.swn
+*.swm
+*.swl
+*.swro
+.~lock.*#
+*~
+/core
+/core.*
+
+# Publication packages (never commit release ZIPs)
+/hybrid-inference-*.zip
